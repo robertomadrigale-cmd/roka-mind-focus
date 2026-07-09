@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ROKA MIND FOCUS - Tu espacio zen de productividad, metas SMART, mentalidad y concentración profunda.">
+  <title>ROKA MIND FOCUS — Claridad · Enfoque · Crecimiento</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon.svg">
+  <meta name="theme-color" content="#0a0a0f">
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  
+  <!-- ===== AUTH OVERLAY ===== -->
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="breathing-circle" style="margin: 0 auto 24px;"></div>
+      <h1 style="font-family:'DM Serif Display',serif;font-size:2rem;margin-bottom:8px;">ROKA MIND FOCUS</h1>
+      <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:32px;letter-spacing:1px;text-transform:uppercase;">Claridad · Enfoque · Crecimiento</p>
+      <button id="google-login-btn" class="zen-btn" style="background:white;color:#1a1a1a;width:100%;display:flex;align-items:center;justify-content:center;gap:12px;font-weight:600;">
+        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Continuar con Google
+      </button>
+      <p id="auth-loading" style="display:none;color:var(--accent-gold);margin-top:16px;font-size:0.85rem;">Conectando...</p>
+      
+      <!-- Footer con enlaces legales -->
+      <footer class="auth-footer" style="margin-top: 32px; font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: center; gap: 16px;">
+        <a href="terminos.html" style="text-decoration: underline;">Términos de Servicio</a>
+        <a href="privacidad.html" style="text-decoration: underline;">Política de Privacidad</a>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ===== COOKIE BANNER ===== -->
+  <div id="cookie-banner" class="cookie-banner" style="display: none;">
+    <div class="cookie-content">
+      <span class="cookie-icon">◇</span>
+      <p class="cookie-text">Utilizamos almacenamiento local y cookies para sincronizar tu progreso en Firebase. Al continuar navegando, aceptas nuestra <a href="privacidad.html" style="text-decoration: underline; color: var(--accent-gold);">Política de Privacidad</a>.</p>
+    </div>
+    <div class="cookie-actions">
+      <button id="cookie-accept-btn" class="zen-btn zen-btn-primary" style="padding: 6px 16px; font-size: 0.8rem;">Aceptar</button>
+    </div>
+  </div>
+
+  <div id="app" style="display:none;">
+
+    <!-- ===== HEADER ===== -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="breathing-circle"></div>
+        <div>
+          <div class="brand-name">ROKA MIND FOCUS</div>
+          <div class="brand-tagline">Claridad · Enfoque · Crecimiento</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <button id="theme-toggle-btn" class="zen-btn zen-btn-ghost" style="padding: 6px 12px; margin-right: 12px; display: flex; align-items: center; justify-content: center;" title="Alternar Tema">◐</button>
+        <button id="settings-toggle-btn" class="zen-btn zen-btn-ghost" style="padding: 6px 12px; margin-right: 12px; display: flex; align-items: center; justify-content: center;" title="Ajustes de I">⚙️</button>
+        <div class="streak-badge" id="streak-badge" title="Racha de días activos">
+          <span class="streak-fire">◆</span>
+          <span class="streak-count" id="streak-count">0</span>
+          <span class="streak-label">días</span>
+        </div>
+        <div class="header-date" id="header-date"></div>
+      </div>
+    </header>
+
+    <!-- ===== SIDEBAR (Desktop) ===== -->
+    <aside class="sidebar" id="sidebar">
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="today">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Hoy</span>
+        </button>
+        <button class="nav-item" data-tab="mindset">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <span>Mentalidad</span>
+        </button>
+        <button class="nav-item" data-tab="strategy">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Estrategia</span>
+        </button>
+        <button class="nav-item" data-tab="reflection">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span>Reflexión</span>
+        </button>
+        <button class="nav-item" data-tab="identity">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span>Mi Base</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="app-main">
+
+    <!-- ===== BOTTOM NAV (Mobile) ===== -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button class="bottom-nav-item active" data-tab="today">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Hoy</span>
+      </button>
+      <button class="bottom-nav-item" data-tab="mindset">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        <span>Mentalidad</span>
+      </button>
+      <button class="bottom-nav-item" data-tab="strategy">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Estrategia</span>
+      </button>
+      <button class="bottom-nav-item" data-tab="reflection">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Reflexión</span>
+      </button>
+      <button class="bottom-nav-item" data-tab="identity">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Mi Base</span>
+      </button>
+    </nav>
+
+      <!-- ===================== DAILY TAB ===================== -->
+      <section class="tab-content active" id="tab-daily">
+
+        <div class="journey-hero">
+          <div class="journey-hero-copy">
+            <span class="journey-kicker">Ruta Zen IA</span>
+            <h1 class="journey-title">Primero claridad. Luego acción.</h1>
+            <p class="journey-subtitle">Tu sistema de hoy se ordena en cinco pasos: llenar, entender, planear, ejecutar y revisar.</p>
+            <div class="journey-actions">
+              <button class="zen-btn zen-btn-primary" id="generate-daily-route-btn">Generar ruta de hoy</button>
+              <button class="zen-btn zen-btn-ghost route-link-btn" data-route-target="ai">Ver coach IA</button>
+            </div>
+          </div>
+          <div class="journey-panel" id="journey-status-panel">
+            <div class="journey-panel-top">
+              <span>Estado del día</span>
+              <strong id="journey-completion-score">0%</strong>
+            </div>
+            <div class="journey-meter"><div id="journey-meter-fill"></div></div>
+            <div class="journey-next" id="journey-next-action">Completa tu primera acción consciente.</div>
+            <div class="journey-steps" id="journey-steps"></div>
+          </div>
+        </div>
+
+        <!-- Panel de Claridad (Dashboard Connection) -->
+        <div class="glass-card clarity-panel" style="margin-bottom: 24px; border-left: 4px solid var(--accent-gold);">
+          <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 250px;">
+              <h3 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-gold); margin-bottom: 8px;">Tu Visión Top 3</h3>
+              <ul id="active-vision-display" style="margin: 0; padding-left: 20px; font-size: 0.95rem; color: var(--text-primary); line-height: 1.5;">
+                <li style="opacity:0.5; list-style:none;">Cargando visión...</li>
+              </ul>
+            </div>
+            <div style="flex: 1; min-width: 250px;">
+              <h3 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-orange); margin-bottom: 8px;">Mantra étivo</h3>
+              <p id="active-mantra-display" style="margin: 0; font-size: 1.1rem; font-style: italic; color: var(--text-primary);">Cargando mantra...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Motivational Quote -->
+        <div class="quote-banner" id="quote-banner">
+          <div class="quote-text" id="quote-text"></div>
+          <div class="quote-author" id="quote-author"></div>
+        </div>
+
+        <div class="grid-2">
+
+          <!-- LEFT: Timer, Planner & Rituals -->
+          <div class="daily-left">
+
+            <!-- Zen Timer / Meditation -->
+            <div class="glass-card meditation-timer-card" id="meditation-timer-card">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <div class="card-icon green">⏱</div>
+                  <h2 class="card-title">Modo Meditación & Respiración</h2>
+                </div>
+                <button class="zen-btn zen-btn-ghost" id="deep-focus-btn" title="Modo Enfoque Profundo">◉ Foco Total</button>
+              </div>
+              <div class="timer-container">
+                <div class="timer-presets">
+                  <button class="preset-btn" data-minutes="3">3 min</button>
+                  <button class="preset-btn active" data-minutes="5">5 min</button>
+                  <button class="preset-btn" data-minutes="10">10 min</button>
+                </div>
+                <div class="timer-circle" id="timer-circle-container">
+                  <svg viewBox="0 0 220 220">
+                    <circle class="track" cx="110" cy="110" r="100"></circle>
+                    <circle class="progress" id="timer-progress" cx="110" cy="110" r="100" stroke-dasharray="628.318" stroke-dashoffset="0"></circle>
+                  </svg>
+                  <div class="timer-display">
+                    <div class="timer-time" id="timer-time">05:00</div>
+                    <div class="breathing-text" id="breathing-text" style="display: none; font-size: 1.1rem; color: var(--accent-green); margin-top: 5px; font-weight: 500;">Inhala...</div>
+                    <div class="timer-label" id="timer-label">meditación</div>
+                  </div>
+                </div>
+                <div class="timer-controls">
+                  <button class="zen-btn zen-btn-primary" id="timer-start-btn">Iniciar</button>
+                  <button class="zen-btn zen-btn-ghost" id="timer-reset-btn">Reiniciar</button>
+                </div>
+                <div class="ambient-controls">
+                  <span class="ambient-label">Respiración:</span>
+                  <button class="preset-btn pattern-btn active" data-pattern="resonance" title="Coherencia Cardíaca (5s inhala, 5s exhala)">5-5</button>
+                  <button class="preset-btn pattern-btn" data-pattern="box" title="Caja (4s inhala, 4s pausa, 4s exhala, 4s pausa)">4-4-4-4</button>
+                  <button class="preset-btn pattern-btn" data-pattern="relax" title="Relajante (4s inhala, 7s pausa, 8s exhala)">4-7-8</button>
+                </div>
+                <div class="ambient-controls" style="margin-top: 10px;">
+                  <span class="ambient-label">Ambiente:</span>
+                  <button class="preset-btn ambient-btn" data-sound="rain">雨 Lluvia</button>
+                  <button class="preset-btn ambient-btn" data-sound="forest">森 Bosque</button>
+                  <button class="preset-btn ambient-btn" data-sound="white">海 Océano</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ★ NEW: Daily Planner -->
+            <div class="glass-card" style="margin-top: 20px;">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <div class="card-icon orange">☐</div>
+                  <h2 class="card-title">Plan del Día</h2>
+                </div>
+                <span class="planner-date-label" id="planner-date-label"></span>
+              </div>
+              <div class="planner-input-row">
+                <input class="zen-input" id="task-input" placeholder="¿Qué harás hoy?">
+                <select class="zen-input planner-priority" id="task-priority">
+                  <option value="high">Alta</option>
+                  <option value="medium" selected>Media</option>
+                  <option value="low">Baja</option>
+                </select>
+                <button class="zen-btn zen-btn-orange icon-action" id="add-task-btn" aria-label="Agregar tarea">+</button>
+              </div>
+              <div class="planner-progress" id="planner-progress">
+                <div class="planner-progress-bar"><div class="planner-progress-fill" id="planner-progress-fill"></div></div>
+                <span class="planner-progress-text" id="planner-progress-text">0/0 tareas</span>
+              </div>
+              <div class="planner-tasks" id="planner-tasks"></div>
+            </div>
+
+            <!-- Daily Rituals Quick Check -->
+            <div class="glass-card" style="margin-top: 20px;">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <div class="card-icon gold">✓</div>
+                  <h2 class="card-title">Rituales del Día</h2>
+                </div>
+              </div>
+              <div id="daily-rituals-quick"></div>
+            </div>
+
+          </div>
+
+          <!-- RIGHT: Mindset Gym -->
+          <div class="daily-right">
+
+            <!-- Gratitud Diaria -->
+            <div class="glass-card" id="gratitude-box">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div class="card-icon green">+</div>
+                  <h2 class="card-title">Gratitud Diaria</h2>
+                </div>
+              </div>
+              <div class="smart-field">
+                <label class="smart-label" style="color: var(--accent-green);">LO QUE APRECIAS SE MULTIPLICA</label>
+                <textarea id="gratitude-input" class="zen-textarea" placeholder="Hoy agradezco por..."></textarea>
+              </div>
+              <button class="zen-btn zen-btn-primary" id="add-gratitude-btn" style="width: 100%;">Registrar Gratitud</button>
+              <div class="victory-timeline" id="gratitude-list" style="margin-top: 20px;">
+                <!-- Gratitudes items -->
+              </div>
+            </div>
+
+            <!-- Mis 3 Orgullos del Día -->
+            <div class="glass-card" style="margin-top: 20px;">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div class="card-icon gold">★</div>
+                  <h2 class="card-title">Mis 3 Orgullos del Día</h2>
+                </div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Motivación</div>
+              </div>
+              <div class="smart-field">
+                <label class="smart-label" style="color: var(--accent-gold);">CELEBRA TUS PEQUEÑAS VICTORIAS HOY</label>
+                <textarea id="pride-input" class="zen-textarea" placeholder="Hoy estoy orgulloso de..."></textarea>
+              </div>
+              <button class="zen-btn zen-btn-gold" id="add-pride-btn" style="width: 100%;">Registrar Orgullo</button>
+              <div class="victory-timeline" id="pride-list" style="margin-top: 20px;">
+                <!-- Orgullos items -->
+              </div>
+            </div>
+
+
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== BELIEFS TAB ===================== -->
+      <section class="tab-content" id="tab-mindset">
+        <div class="sanctuary-hero">
+          <span class="journey-kicker">Taller mental</span>
+          <h1 class="journey-title">Creencias, mantras y claridad interior.</h1>
+          <p class="journey-subtitle">Aquí viven tus pensamientos limitantes, la nueva verdad que elegiste y el historial para volver a ver tu transformación.</p>
+        </div>
+
+        <div class="sub-nav-tabs" style="display:flex; gap:16px; margin-bottom: 32px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px;">
+          <button class="zen-btn mindset-sub-tab active" data-target="mindset-beliefs" style="background:none; border:none; color:var(--text-secondary); padding:8px 16px; font-weight:600; cursor:pointer; transition:all 0.3s ease;">Creencias y Mantras</button>
+          <button class="zen-btn mindset-sub-tab" data-target="mindset-diagnostics" style="background:none; border:none; color:var(--accent-blue); padding:8px 16px; font-weight:600; cursor:pointer; transition:all 0.3s ease; display:flex; align-items:center; gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Coach IA & Diagnósticos
+          </button>
+        </div>
+
+        <div id="mindset-beliefs" class="mindset-sub-content active">
+        <div class="sanctuary-stack">
+          <div class="glass-card reframer-box sanctuary-primary" id="reframer-box">
+            <div class="card-header">
+              <div class="card-title-group">
+                <div class="card-icon orange">↻</div>
+                <h2 class="card-title">Reconfigurar una creencia</h2>
+              </div>
+            </div>
+            <div class="belief-input-area" id="belief-area">
+              <label class="zen-label">Pensamiento limitante</label>
+              <textarea class="zen-textarea" id="belief-input" placeholder="Escribe la idea que te limita con honestidad..."></textarea>
+              <div class="belief-actions">
+                <button class="zen-btn zen-btn-orange" id="reframe-btn">Reconfigurar manual</button>
+                <button class="zen-btn zen-btn-primary" id="ai-reframe-btn" title="Usa la IA para reconfigurar esta creencia según tu perfil">Consultar IA</button>
+              </div>
+            </div>
+            <div class="reframe-input-area" id="reframe-area">
+              <div class="reframe-glow">
+                <label class="zen-label">Nueva verdad / mantra</label>
+                <textarea class="zen-textarea" id="reframe-input" placeholder="Escribe una afirmación sobria, creíble y accionable..."></textarea>
+              </div>
+              <button class="zen-btn zen-btn-primary" id="save-reframe-btn">Guardar creencia y mantra</button>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <div class="card-icon gold">☰</div>
+                <h2 class="card-title">Historial de creencias</h2>
+              </div>
+              <span class="library-count" id="beliefs-count">0 registros</span>
+            </div>
+            <div class="beliefs-library" id="beliefs-library"></div>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <div class="card-icon green">◎</div>
+                <h2 class="card-title">Mantras activos</h2>
+              </div>
+              <button class="zen-btn zen-btn-ghost" id="mantra-slide-btn">Modo meditación</button>
+            </div>
+            <div class="mantra-grid" id="mantras-grid"></div>
+          </div>
+        </div>
+        </div> <!-- end mindset-beliefs -->
+
+        <!-- ===================== DIAGNOSTICS SUB-TAB ===================== -->
+        <div id="mindset-diagnostics" class="mindset-sub-content" style="display:none;">
+        <!-- ═══ AI HERO — Neural Command Center ═══ -->
+        <div class="ai-hero">
+          <div class="ai-hero-aura"></div>
+          <div class="ai-hero-content">
+            <div class="ai-hero-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              <span>Inteligencia Artificial</span>
+            </div>
+            <h1 class="ai-hero-title">Tu Coach<br><span class="ai-gradient-text">Personal IA</span></h1>
+            <p class="ai-hero-desc">La IA analiza tu perfil, hábitos, metas y progreso para crear una ruta personalizada y accionable. Más datos = mejores recomendaciones.</p>
+            
+            <div class="ai-hero-actions">
+              <button class="ai-action-btn primary" id="ai-daily-route-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                Generar Ruta Diaria
+              </button>
+              <button class="ai-action-btn ghost" id="ai-weekly-review-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                Revisión Semanal
+              </button>
+            </div>
+          </div>
+          <div class="ai-hero-visual">
+            <div class="ai-orb">
+              <div class="ai-orb-ring ring-1"></div>
+              <div class="ai-orb-ring ring-2"></div>
+              <div class="ai-orb-ring ring-3"></div>
+              <div class="ai-orb-core"></div>
+            </div>
+            <div class="ai-readiness-ring" id="ai-readiness"></div>
+          </div>
+        </div>
+
+        <!-- ═══ ASSESSMENTS GRID ═══ -->
+        <div class="ai-section-label">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <span>Autodiagnóstico — Responde para desbloquear insights más profundos</span>
+        </div>
+        
+        <div class="ai-assessments-grid">
+          <!-- Archetype Test -->
+          <div class="ai-assessment-card" data-test="archetype">
+            <div class="assessment-card-top">
+              <div class="assessment-icon archetype">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2a14.5 14.5 0 0 0 0 20"/><path d="M12 2a14.5 14.5 0 0 1 0 20"/><path d="M2 12h20"/></svg>
+              </div>
+              <div class="assessment-status" id="archetype-status">Pendiente</div>
+            </div>
+            <h3 class="assessment-title">Arquetipo Mental</h3>
+            <p class="assessment-desc">Descubre tu patrón dominante de pensamiento: ¿Eres Estratega, Creativo, Guardián o Explorador?</p>
+            <div class="quiz-stack" id="archetype-quiz"></div>
+            <div class="diagnosis-result" id="archetype-result"></div>
+            <button class="ai-action-btn small primary" id="save-archetype-test-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Calcular Arquetipo
+            </button>
+          </div>
+
+          <!-- Enneagram Test -->
+          <div class="ai-assessment-card" data-test="enneagram">
+            <div class="assessment-card-top">
+              <div class="assessment-icon enneagram">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="12 2 4.93 7.5 4.93 16.5 12 22 19.07 16.5 19.07 7.5 12 2"/></svg>
+              </div>
+              <div class="assessment-status" id="enneagram-status">Pendiente</div>
+            </div>
+            <h3 class="assessment-title">Eneagrama</h3>
+            <p class="assessment-desc">Identifica tu tipo de personalidad entre los 9 eneatipos y comprende tus motivaciones más profundas.</p>
+            <div class="quiz-stack" id="enneagram-quiz"></div>
+            <div class="diagnosis-result" id="enneagram-result"></div>
+            <button class="ai-action-btn small primary" id="save-enneagram-test-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Calcular Eneagrama
+            </button>
+          </div>
+
+          <!-- Productivity Test -->
+          <div class="ai-assessment-card" data-test="productivity">
+            <div class="assessment-card-top">
+              <div class="assessment-icon productivity">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              </div>
+              <div class="assessment-status" id="productivity-status">Pendiente</div>
+            </div>
+            <h3 class="assessment-title">Perfil Productivo</h3>
+            <p class="assessment-desc">Analiza tu estilo de ejecución: velocidad, profundidad, consistencia y recuperación ante bloqueos.</p>
+            <div class="quiz-stack" id="productivity-quiz"></div>
+            <div class="diagnosis-result" id="productivity-result"></div>
+            <button class="ai-action-btn small primary" id="save-productivity-test-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Calcular Perfil
+            </button>
+          </div>
+        </div>
+
+        <!-- ═══ AI REPORTS GENERATION ═══ -->
+        <div class="ai-section-label" style="margin-top: 32px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>Reportes IA — Informes generados por inteligencia artificial</span>
+        </div>
+
+        <div class="ai-reports-panel glass-card">
+          <div class="ai-reports-actions">
+            <button class="ai-report-chip map-report-btn" data-report="personal">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Mapa Personal IA
+            </button>
+            <button class="ai-report-chip map-report-btn" data-report="steps">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+              Siguientes Pasos
+            </button>
+            <button class="ai-report-chip map-report-btn" data-report="deep">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Diagnóstico Profundo
+            </button>
+          </div>
+          <div class="diagnosis-summary" id="diagnosis-summary"></div>
+        </div>
+
+        <!-- ═══ GENERATED REPORTS HISTORY ═══ -->
+        <div class="ai-reports-history glass-card" style="margin-top: 16px;">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon gold">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+              </div>
+              <h2 class="card-title">Historial de Informes</h2>
+            </div>
+          </div>
+          <div id="map-reports-list"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- ===================== STRATEGY TAB ===================== -->
+      <!-- ===================== REFLECTION TAB ===================== -->
+      <section class="tab-content" id="tab-reflection">
+        <div class="sanctuary-hero">
+          <span class="journey-kicker">Reflexión y Análisis</span>
+          <h1 class="journey-title">Evalúa tu progreso y ajusta el rumbo.</h1>
+          <p class="journey-subtitle">Revisa tus logros semanales, analiza tu dashboard y planifica en tu calendario.</p>
+        </div>
+
+        <div class="sub-nav-tabs" style="display:flex; gap:16px; margin-bottom: 32px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px;">
+          <button class="zen-btn reflection-sub-tab active" data-target="reflection-weekly" style="background:none; border:none; color:var(--text-secondary); padding:8px 16px; font-weight:600; cursor:pointer; transition:all 0.3s ease;">Revisión Semanal</button>
+          <button class="zen-btn reflection-sub-tab" data-target="reflection-progress" style="background:none; border:none; color:var(--text-secondary); padding:8px 16px; font-weight:600; cursor:pointer; transition:all 0.3s ease;">Dashboard</button>
+          <button class="zen-btn reflection-sub-tab" data-target="reflection-calendar" style="background:none; border:none; color:var(--text-secondary); padding:8px 16px; font-weight:600; cursor:pointer; transition:all 0.3s ease;">Calendario</button>
+        </div>
+
+        <div id="reflection-weekly" class="reflection-sub-content active">
+          <div class="section-header">
+          <h1 class="section-title font-serif">Revisión Semanal & Rituales</h1>
+          <p class="section-subtitle">Instala hábitos de alto rendimiento y reflexiona sobre tu semana</p>
+        </div>
+        <div class="glass-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon green">↺</div>
+              <h2 class="card-title">Instalador de Rituales</h2>
+            </div>
+            <div class="ritual-add-row">
+              <input class="zen-input" id="ritual-input" placeholder="Nuevo ritual..." style="width: 200px;">
+              <button class="zen-btn zen-btn-primary" id="add-ritual-btn">+ Agregar</button>
+            </div>
+          </div>
+          <div id="rituals-container"></div>
+        </div>
+        <div class="grid-2" style="margin-top: 20px;">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="card-title-group"><div class="card-icon gold">✦</div><h2 class="card-title">¿Qué salió excepcionalmente bien?</h2></div>
+            </div>
+            <textarea class="zen-textarea" id="weekly-well" placeholder="Reflexiona sobre tus éxitos..." style="min-height: 120px;"></textarea>
+          </div>
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="card-title-group"><div class="card-icon orange">⟲</div><h2 class="card-title">¿Qué ajustaré la próxima semana?</h2></div>
+            </div>
+            <textarea class="zen-textarea" id="weekly-adjust" placeholder="¿Qué cambiarás o mejorarás?..." style="min-height: 120px;"></textarea>
+          </div>
+        </div>
+        <div style="margin-top: 20px;">
+          <button class="zen-btn zen-btn-primary" id="save-weekly-btn" style="width: 100%; margin-bottom: 12px;">Guardar revisión semanal</button>
+          <button class="zen-btn zen-btn-primary" id="ai-weekly-btn" style="width: 100%; background: var(--accent-blue);" title="Recibe feedback de tu AI Coach basándose en tu progreso">Consultar IA</button>
+        </div>
+        </div>
+
+        <div id="reflection-progress" class="reflection-sub-content" style="display:none;">
+          <div class="section-header">
+          <h1 class="section-title font-serif">Dashboard de Progreso</h1>
+          <p class="section-subtitle">Tu panorama completo de crecimiento personal</p>
+        </div>
+
+        <div class="glass-card">
+            <div class="card-header">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="card-icon green">◎</div>
+                <h2 class="card-title">Evaluación Global de Progreso Vital</h2>
+              </div>
+            </div>
+            
+            <div class="life-assessment" id="life-assessment">
+              <!-- Assessment rows renderizadas desde JS -->
+            </div>
+        </div>
+        <div class="stats-grid" id="stats-grid" style="margin-top: 20px;"></div>
+        <div class="grid-2" style="margin-top: 20px;">
+          <div class="glass-card">
+            <div class="card-header"><div class="card-title-group"><div class="card-icon green">↗</div><h2 class="card-title">étividad de 30 días</h2></div></div>
+            <div class="heatmap" id="heatmap"></div>
+          </div>
+          <div class="glass-card">
+            <div class="card-header"><div class="card-title-group"><div class="card-icon gold">M</div><h2 class="card-title">Avance SMART</h2></div></div>
+            <div id="smart-progress-summary"></div>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top: 20px;">
+          <div class="glass-card">
+            <div class="card-header"><div class="card-title-group"><div class="card-icon gold">+</div><h2 class="card-title">Orgullos recientes</h2></div></div>
+            <div id="recent-prides"></div>
+          </div>
+          <div class="glass-card">
+            <div class="card-header"><div class="card-title-group"><div class="card-icon orange">↻</div><h2 class="card-title">Creencias reconfiguradas</h2></div></div>
+            <div id="recent-beliefs"></div>
+          </div>
+        </div>
+        </div>
+
+        <div id="reflection-calendar" class="reflection-sub-content" style="display:none;">
+          <div class="section-header">
+          <h1 class="section-title font-serif">Calendario de étividad</h1>
+          <p class="section-subtitle">Visualiza tu progreso día a día — cada punto es una acción que tomaste</p>
+        </div>
+
+        <div class="glass-card">
+          <div class="calendar-nav">
+            <button class="zen-btn zen-btn-ghost" id="cal-prev">◂ Anterior</button>
+            <h2 class="calendar-month-title" id="cal-month-title"></h2>
+            <button class="zen-btn zen-btn-ghost" id="cal-next">Siguiente ▸</button>
+          </div>
+          <div class="calendar-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:var(--accent-green);"></span> Victorias</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--accent-gold);"></span> Orgullos</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--accent-orange);"></span> Creencias</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--accent-blue);"></span> Tareas</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#b48c6f;"></span> SMART</span>
+            <span class="legend-item"><span class="legend-dot section"></span> Secciones</span>
+          </div>
+          <div class="calendar-grid" id="calendar-grid"></div>
+        </div>
+
+        <!-- Day Detail Panel -->
+        <div class="glass-card" id="cal-day-detail" style="margin-top: 20px; display: none;">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon green">•</div>
+              <h2 class="card-title" id="cal-detail-title">Detalle del día</h2>
+            </div>
+            <span class="calendar-sync-label">Lectura sincronizada</span>
+          </div>
+          <div id="cal-detail-content"></div>
+        </div>
+        </div>
+      </section>
+      <!-- ===================== IDENTITY TAB ===================== -->
+      <section class="tab-content" id="tab-identity">
+        <div class="sanctuary-hero">
+          <span class="journey-kicker">Mi Base</span>
+          <h1 class="journey-title">El centro de operaciones de tu vida.</h1>
+          <p class="journey-subtitle">Aquí defines quién eres, qué quieres lograr y evalúas tu equilibrio en las distintas áreas de la vida.</p>
+        </div>
+
+        <div class="sub-nav-tabs" style="display:flex; gap:16px; margin-bottom: 32px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px;">
+          <button class="zen-btn identity-sub-tab active" data-target="identity-profile" style="background:none; border:none; color:var(--text-secondary); padding:8px 16px; font-weight:600; cursor:pointer; transition:all 0.3s ease;">Perfil y Rueda</button>
+          <button class="zen-btn identity-sub-tab" data-target="identity-annual" style="background:none; border:none; color:var(--text-secondary); padding:8px 16px; font-weight:600; cursor:pointer; transition:all 0.3s ease;">Visión Anual</button>
+        </div>
+
+        <div id="identity-profile" class="identity-sub-content active">
+          <div class="grid-2">
+            
+            <div class="glass-card view-mode" id="profile-card">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div class="card-icon gold">⊕</div>
+                  <h2 class="card-title">Tu Perfil Zen</h2>
+                </div>
+                <button class="zen-btn zen-btn-ghost" id="edit-profile-btn" style="padding: 4px 8px;">✏️ Editar</button>
+              </div>
+              
+              <div class="smart-field">
+                <label class="smart-label">Nombre o Alias</label>
+                <input type="text" id="profile-name" class="zen-input" placeholder="¿Cómo te llamas?">
+              </div>
+              
+              <div class="smart-field">
+                <label class="smart-label">Mayores Miedos o Bloqueos</label>
+                <textarea id="profile-fears" class="zen-textarea" placeholder="¿Qué pensamientos limitantes o miedos te frenan usualmente? (Esto ayudará a la IA a reconfigurarlos)"></textarea>
+              </div>
+
+              <div class="smart-field">
+                <label class="smart-label">Tus 3 Valores Fundamentales</label>
+                <input type="text" id="profile-values" class="zen-input" placeholder="Ej: Libertad, Disciplina, Creatividad">
+              </div>
+
+              <div class="smart-field">
+                <label class="smart-label" style="color: var(--accent-gold);">Historia de Vida Profunda</label>
+                <textarea id="profile-life-history" class="zen-textarea" placeholder="Escribe aquí tu historia completa: infancia, mayores logros, eventos que te marcaron... (Esto ayuda a la IA a conocerte profundamente)" style="min-height: 120px;"></textarea>
+              </div>
+
+              <div class="grid-2">
+                <div class="smart-field">
+                  <label class="smart-label">Fecha de Nacimiento</label>
+                  <input type="date" id="profile-birth-date" class="zen-input">
+                </div>
+                <div class="smart-field">
+                  <label class="smart-label">Hora (Aprox.)</label>
+                  <input type="time" id="profile-birth-time" class="zen-input">
+                </div>
+              </div>
+              
+              <div class="smart-field">
+                <label class="smart-label">Lugar de Nacimiento</label>
+                <input type="text" id="profile-birth-place" class="zen-input" placeholder="Ciudad, País">
+              </div>
+              
+              <button class="zen-btn zen-btn-primary" id="save-profile-btn" style="width: 100%; display: none;">Guardar Configuración</button>
+            </div>
+
+            <div>
+              <div class="glass-card" style="margin-bottom: 20px;">
+                <div class="card-header">
+
+              </div>
+
+              <div class="glass-card">
+                <div class="card-header">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="card-icon green">🏆</div>
+                    <h2 class="card-title">Vitrina de Logros (Badges)</h2>
+                  </div>
+                  <div id="profile-xp-total" style="font-size: 0.85rem; color: var(--accent-gold); font-weight: 600;">0 XP Total</div>
+                </div>
+                
+                <div class="badges-grid" id="badges-container">
+                  <!-- Badges renderizadas desde JS -->
+                </div>
+              </div>
+              <button class="zen-btn flow-btn" onclick="document.querySelector('[data-target=\'identity-annual\']').click(); window.scrollTo({top:0});" style="width:100%; margin-top:24px; padding:16px; border:1px solid var(--accent-gold); color:var(--accent-gold); background:transparent;">Continuar a Visión Anual ➔</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="identity-annual" class="identity-sub-content" style="display:none;">
+          <div class="section-header">
+          <h1 class="section-title font-serif">Visión Anual & Plano de Vida</h1>
+          <p class="section-subtitle">Tu Big 5, valores fundamentales y la persona en la que te convertirás</p>
+        </div>
+        <div class="glass-card view-mode" id="vision-card">
+          <div class="card-header">
+            <div class="card-title-group"><div class="card-icon gold">5Y</div><h2 class="card-title">Mi Visión a 5 Años</h2></div>
+            <div style="display: flex; gap: 8px;">
+              <button class="zen-btn zen-btn-ghost" id="edit-vision-btn" style="padding: 4px 8px;">✏️ Editar</button>
+              <button class="zen-btn zen-btn-primary" id="save-annual-btn" style="display: none;">Guardar visión</button>
+            </div>
+          </div>
+          <textarea class="zen-textarea" id="vision-text" placeholder="Describe tu vida ideal en 5 años..." style="min-height: 140px;"></textarea>
+        </div>
+        <div class="grid-3" style="margin-top: 20px;">
+          <div class="glass-card">
+            <div class="card-header"><div class="card-title-group"><div class="card-icon orange">▲</div><h2 class="card-title">Big 5 del Año</h2></div></div>
+            <p class="card-subtitle">Las 5 metas que hacen de este año un éxito rotundo</p>
+            <div class="big5-list" id="annual-big5"></div>
+          </div>
+          <div class="glass-card">
+            <div class="card-header"><div class="card-title-group"><div class="card-icon green">◆</div><h2 class="card-title">Mis 5 Valores</h2></div></div>
+            <p class="card-subtitle">Los valores no negociables que dirigen mi vida</p>
+            <div class="big5-list" id="annual-values"></div>
+          </div>
+          <div class="glass-card">
+            <div class="card-header"><div class="card-title-group"><div class="card-icon gold">⟐</div><h2 class="card-title">En Quién Me Convertiré</h2></div></div>
+            <p class="card-subtitle">Las 5 identidades que debo desarrollar</p>
+            <div class="big5-list" id="annual-become"></div>
+          </div>
+        </div>
+
+        <div class="glass-card" style="margin-top: 20px;">
+          <div class="card-header"><div class="card-title-group"><div class="card-icon green">◎</div><h2 class="card-title">Rueda de la Vida</h2></div></div>
+          <p class="card-subtitle">Evalúa tu estado actual para saber dónde enfocarte</p>
+          <div class="life-wheel-container">
+            <div class="life-wheel" id="life-wheel"><svg id="life-wheel-svg" viewBox="0 0 340 340" width="340" height="340"></svg></div>
+            <div class="wheel-scores" id="wheel-scores"></div>
+          </div>
+        </div>
+        <button class="zen-btn flow-btn" onclick="document.querySelector('[data-tab=\'strategy\']').click(); window.scrollTo({top:0});" style="width:100%; margin-top:24px; padding:16px; border:1px solid var(--accent-orange); color:var(--accent-orange); background:transparent;">Continuar a Estrategia ➔</button>
+        </div>
+      </section>
+
+
+      <section class="tab-content" id="tab-strategy">
+        <div class="sub-nav-tabs" style="display:flex; gap:16px; margin-bottom: 24px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;">
+          <button class="zen-btn strat-sub-tab active" data-target="strat-monthly" style="background:transparent; color:var(--accent-gold); border:none; font-weight:bold; padding:0;">Mensual</button>
+          <button class="zen-btn strat-sub-tab" data-target="strat-quarterly" style="background:transparent; color:var(--text-secondary); border:none; padding:0;">Trimestral</button>
+        </div>
+
+        <div id="strat-monthly" class="strat-content active">
+        <div class="section-header">
+          <h1 class="section-title font-serif">Planificación Mensual</h1>
+          <p class="section-subtitle">Objetivos SMART, aprendizaje y lo que dejarás de hacer</p>
+        </div>
+
+        <!-- SMART Goals -->
+        <div class="glass-card">
+          <div class="card-header">
+              <div class="card-title-group"><div class="card-icon orange">M</div><h2 class="card-title">Objetivos SMART</h2></div>
+            <button class="zen-btn zen-btn-orange" id="add-smart-btn">+ Nuevo Objetivo</button>
+          </div>
+          <div class="smart-form" id="smart-form" style="display: none;">
+            <div class="smart-field">
+              <label class="smart-label">Meta — ¿Qué quieres lograr?</label>
+              <textarea class="zen-textarea" id="smart-goal-input" placeholder="Ej: Aumentar mis ingresos significativamente"></textarea>
+            </div>
+            <div class="grid-2">
+              <div class="smart-field"><label class="smart-label">Medible — ¿En qué métrica?</label><input class="zen-input" id="smart-measurable" placeholder="Ej: $100,000 pesos"></div>
+              <div class="smart-field"><label class="smart-label">Relevancia — ¿Por qué es vital?</label><input class="zen-input" id="smart-relevance" placeholder="Ej: Respiro financiero"></div>
+            </div>
+            <div class="grid-2">
+              <div class="smart-field"><label class="smart-label">Plazo (días): <span id="smart-duration-label">30</span></label><input type="range" class="timeline-slider" id="smart-duration" min="7" max="90" value="30"></div>
+              <div class="smart-field"><label class="smart-label">Avance inicial: <span id="smart-progress-label">0</span>%</label><input type="range" class="timeline-slider" id="smart-progress" min="0" max="100" value="0"></div>
+            </div>
+            <div class="grid-2">
+              <div class="smart-field"><label class="smart-label">¿Es alcanzable?</label><button class="smart-toggle" id="smart-achievable"><span class="sr-only">Alcanzable</span></button></div>
+              <div class="smart-field"><label class="smart-label">Siguiente avance visible</label><input class="zen-input" id="smart-next-step" placeholder="Ej: completar propuesta, entrenar 3 dias, llamar a..."></div>
+            </div>
+            <div class="smart-form-actions">
+              <button class="zen-btn zen-btn-primary" id="save-smart-btn">Guardar Objetivo</button>
+              <button class="zen-btn zen-btn-ghost" id="cancel-smart-btn">Cancelar</button>
+            </div>
+          </div>
+          <div id="smart-goals-container"></div>
+        </div>
+
+        <div class="grid-2" style="margin-top: 20px;">
+          <!-- Learning & Growth -->
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="card-title-group"><div class="card-icon gold">📖</div><h2 class="card-title">Aprendizaje & Crecimiento</h2></div>
+            </div>
+            <div class="learning-grid-single" id="learning-container">
+              <div class="learning-slot"><div class="learning-type">Libro a leer</div><input class="zen-input" id="learning-book" placeholder="¿Qué libro te comprometes a leer?"></div>
+              <div class="learning-slot"><div class="learning-type">Curso online</div><input class="zen-input" id="learning-course" placeholder="¿En qué curso te inscribirás?"></div>
+              <div class="learning-slot"><div class="learning-type">Conferencia en vivo</div><input class="zen-input" id="learning-conference" placeholder="¿A qué evento asistirás?"></div>
+              <div class="learning-slot"><div class="learning-type">Mastermind</div><input class="zen-input" id="learning-mastermind" placeholder="¿En qué mastermind participarás?"></div>
+            </div>
+            <button class="zen-btn zen-btn-primary section-save-btn" id="save-learning-btn">Guardar aprendizaje</button>
+          </div>
+
+          <!-- ★ NEW: 90-Day Stop Doing List -->
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="card-title-group"><div class="card-icon orange">✕</div><h2 class="card-title">Lista de DEJAR de Hacer (90 días)</h2></div>
+            </div>
+            <p class="card-subtitle">Distracciones, malos hábitos y actividades que drenan tu energía</p>
+            <div class="stop-doing-list" id="stop-doing-list"></div>
+            <button class="zen-btn zen-btn-primary section-save-btn" id="save-stop-doing-btn">Guardar lista</button>
+          </div>
+        </div>
+        </div>
+
+        <div id="strat-quarterly" class="strat-content" style="display: none;">
+        <div class="section-header">
+          <h1 class="section-title font-serif">Plan Trimestral</h1>
+          <p class="section-subtitle">Rueda de la vida, 10 prioridades y tu Círculo de Gigantes</p>
+        </div>
+        <div class="grid-2">
+          <div class="glass-card">
+            <div class="card-header">
+              <div class="card-title-group"><div class="card-icon gold">👥</div><h2 class="card-title">Círculo de Gigantes</h2></div>
+              <button class="zen-btn zen-btn-gold" id="add-giant-btn">+ Agregar</button>
+            </div>
+            <div class="giant-form" id="giant-form" style="display: none;">
+              <div class="grid-2"><input class="zen-input" id="giant-name" placeholder="Nombre"><input class="zen-input" id="giant-role" placeholder="Rol / Influencia"></div>
+              <div class="grid-2" style="margin-top: 8px;"><input class="zen-input" id="giant-action" placeholder="éción (ej: Llamar, Café)"><select class="zen-input" id="giant-status"><option value="connected">Conectado</option><option value="to-reach">Por Contactar</option></select></div>
+              <div style="margin-top: 8px; display: flex; gap: 8px;"><button class="zen-btn zen-btn-primary" id="save-giant-btn">Guardar</button><button class="zen-btn zen-btn-ghost" id="cancel-giant-btn">Cancelar</button></div>
+            </div>
+            <div class="giants-list" id="giants-container"></div>
+          </div>
+        </div>
+        <div class="glass-card" style="margin-top: 20px;">
+          <div class="card-header"><div class="card-title-group"><div class="card-icon orange">10</div><h2 class="card-title">Las 10 Prioridades del Trimestre</h2></div><button class="zen-btn zen-btn-primary" id="save-quarterly-btn">Guardar prioridades</button></div>
+          <div class="quarterly-list" id="quarterly10-container"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- ===================== ANNUAL TAB ===================== -->
+      
+
+      <!-- ===================== MANTRAS TAB ===================== -->
+
+      <!-- TAB: CONFIGURACIÓN -->
+      
+
+    </main>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- Mantra Slide Overlay -->
+    <div class="mantra-slide-overlay" id="mantra-slide-overlay" style="display: none;">
+      <button class="mantra-slide-close" id="mantra-slide-close">✕</button>
+      <div class="breathing-circle" style="width: 60px; height: 60px; margin-bottom: 40px;"></div>
+      <div class="mantra-slide-text" id="mantra-slide-text"></div>
+      <div class="mantra-slide-counter" id="mantra-slide-counter"></div>
+    </div>
+
+  </div><!-- /#app -->
+
+  <!-- ===== ONBOARDING MODAL / TOUR OVERLAY ===== -->
+  <div id="onboarding-overlay" class="onboarding-overlay" style="display: none;">
+    <div class="onboarding-card">
+      <div class="onboarding-header">
+        <div class="breathing-circle" style="width: 48px; height: 48px; margin: 0 auto 16px;"></div>
+        <h2 class="font-serif text-gradient" style="font-size: 1.8rem; margin-bottom: 8px;" id="onboarding-title">¡Bienvenido a tu Espacio Zen!</h2>
+        <div class="onboarding-step-indicator" id="onboarding-step">Paso 1 de 4</div>
+      </div>
+      <div class="onboarding-body" id="onboarding-desc" style="color: var(--text-secondary); font-size: 0.95rem; margin: 20px 0; line-height: 1.6;">
+        Estás por iniciar un viaje hacia el alto rendimiento y la paz mental. Permítenos guiarte a través de los pilares de ROKA MIND FOCUS.
+      </div>
+      <div class="onboarding-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px;">
+        <button id="onboarding-skip" class="zen-btn zen-btn-ghost" style="font-size: 0.8rem; padding: 8px 16px;">Omitir</button>
+        <button id="onboarding-next" class="zen-btn zen-btn-primary" style="font-size: 0.8rem; padding: 8px 20px;">Siguiente →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== AI SETTINGS MODAL ===== -->
+  <div id="ai-settings-modal" class="auth-overlay" style="display: none;">
+    <div class="auth-card" style="max-width: 500px; text-align: left; position: relative;">
+      <button class="zen-btn zen-btn-ghost" id="close-ai-settings-btn" style="position: absolute; top: 16px; right: 16px; font-size: 1.2rem;">✕</button>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px;">
+        <div class="card-icon blue">AI</div>
+        <h2 class="card-title" style="margin: 0; font-family:'DM Serif Display',serif;font-size:1.5rem;">Motor de Inteligencia Artificial</h2>
+      </div>
+      
+      <div class="smart-field">
+        <label class="smart-label">Proveedor / Empresa IA</label>
+        <select id="ai-provider" class="zen-input" style="appearance: auto; background-color: rgba(255,255,255,0.03);">
+          <option value="" style="color: #000;">Seleccionar Proveedor</option>
+          <option value="openai" style="color: #000;">OpenAI (ChatGPT)</option>
+          <option value="anthropic" style="color: #000;">Anthropic (Claude)</option>
+          <option value="google" style="color: #000;">Google (Gemini)</option>
+          <option value="deepseek" style="color: #000;">DeepSeek</option>
+          <option value="ollama" style="color: #000;">Ollama (Local)</option>
+          <option value="custom" style="color: #000;">Otro (Custom)</option>
+        </select>
+      </div>
+      
+      <div class="smart-field">
+        <label class="smart-label">Modelo Específico</label>
+        <input type="text" id="ai-model" class="zen-input" placeholder="Ej: gpt-4, claude-3-opus, gemini-1.5-pro">
+      </div>
+      
+      <div class="smart-field">
+        <label class="smart-label">API Key</label>
+        <input type="password" id="ai-apikey" class="zen-input" placeholder="Opcional: si esta vacia se usara el gateway corporativo">
+      </div>
+
+      <div class="smart-field">
+        <label class="smart-label" style="color: var(--accent-blue);">Instrucciones Base (System Prompt)</label>
+        <textarea id="ai-prompt" class="zen-textarea" placeholder="Ej: Eres un coach de alto rendimiento duro pero empático. No me des respuestas genéricas. Háblame directo y exige lo mejor de mí..."></textarea>
+      </div>
+      
+      <button class="zen-btn zen-btn-primary" id="save-ai-btn" style="width: 100%; margin-top: 16px;">Guardar Configuración IA</button>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
