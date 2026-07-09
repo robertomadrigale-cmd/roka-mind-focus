@@ -13,8 +13,16 @@
     "ignore": [
       "firebase.json",
       "**/.*",
+      ".git/**",
       "**/node_modules/**",
-      "functions/**"
+      "functions/**",
+      "debug_*",
+      "catch_error.js",
+      "puppeteer_screenshot.js",
+      "fix_*.py",
+      "refactor_*.py",
+      "*.png",
+      "deployed-firestore.rules"
     ],
     "rewrites": [
       {
