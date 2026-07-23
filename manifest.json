@@ -1,7 +1,7 @@
 {
   "name": "ROKA MIND FOCUS",
-  "short_name": "Zen Focus",
-  "start_url": "/index.html",
+  "short_name": "ROKA",
+  "start_url": "/#/hoy",
   "display": "standalone",
   "background_color": "#0f1114",
   "theme_color": "#0f1114",
