@@ -1,4 +1,55 @@
 const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * 100;
+const BREATHING_PATTERNS = {
+  resonance: {
+    className: 'pattern-resonance',
+    cycleTime: 10000,
+    steps: [{ ms: 0, text: 'Inhala suave...' }, { ms: 5000, text: 'Exhala lento...' }]
+  },
+  box: {
+    className: 'pattern-box',
+    cycleTime: 16000,
+    steps: [
+      { ms: 0, text: 'Inhala...' },
+      { ms: 4000, text: 'Mantén...' },
+      { ms: 8000, text: 'Exhala...' },
+      { ms: 12000, text: 'Mantén...' }
+    ]
+  },
+  relax: {
+    className: 'pattern-relax',
+    cycleTime: 19000,
+    steps: [
+      { ms: 0, text: 'Inhala...' },
+      { ms: 4000, text: 'Mantén...' },
+      { ms: 11000, text: 'Exhala largo...' }
+    ]
+  },
+  extended: {
+    className: 'pattern-extended',
+    cycleTime: 10000,
+    steps: [{ ms: 0, text: 'Inhala por nariz...' }, { ms: 4000, text: 'Exhala más largo...' }]
+  },
+  sigh: {
+    className: 'pattern-sigh',
+    cycleTime: 9000,
+    steps: [
+      { ms: 0, text: 'Inhala...' },
+      { ms: 1800, text: 'Completa un poco más...' },
+      { ms: 3000, text: 'Suelta largo...' }
+    ]
+  },
+  diaphragm: {
+    className: 'pattern-diaphragm',
+    cycleTime: 9000,
+    steps: [{ ms: 0, text: 'Expande abdomen...' }, { ms: 3000, text: 'Exhala sin prisa...' }]
+  },
+  pursed: {
+    className: 'pattern-pursed',
+    cycleTime: 6000,
+    steps: [{ ms: 0, text: 'Inhala nariz...' }, { ms: 2000, text: 'Exhala labios suaves...' }]
+  }
+};
+const BREATHING_PATTERN_CLASSES = Object.values(BREATHING_PATTERNS).map(pattern => pattern.className);
 
 export class Timer {
   constructor({ $, $$, onComplete }) {
@@ -39,7 +90,7 @@ export class Timer {
           if (this.state.running) return;
           this.$$('.pattern-btn').forEach(x => x.classList.remove('active'));
           patternBtn.classList.add('active');
-          this.activePattern = patternBtn.dataset.pattern;
+          this.activePattern = BREATHING_PATTERNS[patternBtn.dataset.pattern] ? patternBtn.dataset.pattern : 'resonance';
         }
       });
     }
@@ -71,8 +122,9 @@ export class Timer {
     // Add the specific pattern class to the circle
     const circle = this.$('#timer-circle-container');
     if (circle) {
-      circle.classList.remove('pattern-resonance', 'pattern-box', 'pattern-relax');
-      circle.classList.add(`pattern-${this.activePattern}`);
+      const pattern = BREATHING_PATTERNS[this.activePattern] || BREATHING_PATTERNS.resonance;
+      circle.classList.remove(...BREATHING_PATTERN_CLASSES);
+      circle.classList.add(pattern.className);
     }
     
     const breathingText = this.$('#breathing-text');
@@ -108,7 +160,7 @@ export class Timer {
     document.body.classList.remove('meditation-fullscreen-active');
     
     const circle = this.$('#timer-circle-container');
-    if (circle) circle.classList.remove('pattern-resonance', 'pattern-box', 'pattern-relax');
+    if (circle) circle.classList.remove(...BREATHING_PATTERN_CLASSES);
     
     const breathingText = this.$('#breathing-text');
     if (breathingText) breathingText.style.display = 'none';
@@ -150,29 +202,8 @@ export class Timer {
 
   startBreathingCycle() {
     this.stopBreathingCycle();
-    
-    let cycleTime = 10000;
-    let steps = [];
-    
-    if (this.activePattern === 'resonance') {
-      cycleTime = 10000;
-      steps = [{ ms: 0, text: 'Inhala...' }, { ms: 5000, text: 'Exhala...' }];
-    } else if (this.activePattern === 'box') {
-      cycleTime = 16000;
-      steps = [
-        { ms: 0, text: 'Inhala...' },
-        { ms: 4000, text: 'Mantén...' },
-        { ms: 8000, text: 'Exhala...' },
-        { ms: 12000, text: 'Mantén...' }
-      ];
-    } else if (this.activePattern === 'relax') {
-      cycleTime = 19000;
-      steps = [
-        { ms: 0, text: 'Inhala...' },
-        { ms: 4000, text: 'Mantén...' },
-        { ms: 11000, text: 'Exhala...' }
-      ];
-    }
+    const pattern = BREATHING_PATTERNS[this.activePattern] || BREATHING_PATTERNS.resonance;
+    const { cycleTime, steps } = pattern;
 
     const runCycle = () => {
       const el = this.$('#breathing-text');
@@ -203,7 +234,7 @@ export class Timer {
     if (isActive) {
       document.body.classList.remove('meditation-fullscreen-active');
       const circle = this.$('#timer-circle-container');
-      if (circle) circle.classList.remove('pattern-resonance', 'pattern-box', 'pattern-relax');
+      if (circle) circle.classList.remove(...BREATHING_PATTERN_CLASSES);
       const breathingText = this.$('#breathing-text');
       if (breathingText && !this.state.running) breathingText.style.display = 'none';
     }

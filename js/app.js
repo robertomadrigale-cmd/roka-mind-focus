@@ -1,9 +1,10 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, browserLocalPersistence, getRedirectResult, setPersistence, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 import { Timer } from "./components/Timer.js";
 import { LifeWheel, LIFE_WHEEL_AXES } from "./components/LifeWheel.js";
-import { callAIGateway, callAIProvider } from "./services/aiGateway.js";
+import { callAIGateway } from "./services/aiGateway.js?v=10.7";
+import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
 
 // ==========================================
 // ROKA MIND FOCUS — Application Core v2.0
@@ -30,14 +31,16 @@ let selectedCalendarDate = todayStr();
 
 // ─── DEFAULT STATE ───
 const DEFAULT_STATE = {
-  stateVersion: 2,
+  stateVersion: 3,
   updatedAt: '',
   pendingCloudSync: false,
   beliefs: [], mantras: [], victories: [], prideLogs: [], gratitudeLogs: [],
   smartGoals: [], rituals: [], circleOfGiants: [],
   userProfile: { name: '', archetype: '', vision: '', fears: '', values: '', learning: '', lifeHistory: '', enneagram: '', birthDate: '', birthTime: '', birthPlace: '' },
-  aiConfig: { provider: 'openai', model: 'gpt-4o', apiKey: '', prompt: '' },
+  aiConfig: { prompt: '' },
+  coachPreferences: { style: 'direct', useCoreContext: true, useSensitiveContext: false },
   aiReports: [],
+  reportsMigrated: false,
   personalMap: {
     archetypeAnswers: {},
     enneagramAnswers: {},
@@ -58,13 +61,39 @@ const DEFAULT_STATE = {
   dailyTasks: {},
   stopDoingList: ['','','','','','','','','',''],
   activityLog: {},
-  hasSeenOnboarding: false
+  hasSeenOnboarding: false,
+  onboarding: { status: 'not_started', completedAt: '', step: 0 }
 };
+
+const AI_PROVIDER_DEFAULTS = {
+  openai: 'gpt-4o',
+  google: 'gemini-2.5-flash',
+  deepseek: 'deepseek-chat'
+};
+const AI_PROVIDER_KEY = 'rokaMindAIProvider';
+const AI_MODEL_KEY = 'rokaMindAIModel';
+const AI_SESSION_KEY = 'rokaMindAIKey';
+const THEME_PRESET_KEY = 'rokaMindThemePreset';
+const THEME_PRESETS = [
+  { code: 'zen-garden', name: 'Zen Garden', description: 'Niebla, piedra y calma profunda', swatches: ['#07120e', '#163226', '#8fcfba', '#d8c08a'] },
+  { code: 'executive-blue', name: 'Azul ejecutivo', description: 'Actual y seguro', swatches: ['#07111E', '#122238', '#68B7FF'] },
+  { code: 'graphite', name: 'Graphite', description: 'Premium oscuro', swatches: ['#080A0D', '#171C24', '#78B7FF'] },
+  { code: 'emerald', name: 'Emerald', description: 'Comercial fresco', swatches: ['#06140F', '#112B22', '#58D99A'] },
+  { code: 'wine', name: 'Wine', description: 'Ejecutivo calido', swatches: ['#170A12', '#321826', '#F08CAA'] },
+  { code: 'opera-gx', name: 'Opera GX', description: 'Neon gamer magenta', swatches: ['#0D0A14', '#1A1322', '#FF1B57'] },
+  { code: 'moleskine', name: 'Moleskine', description: 'Negro, papel y elastico', swatches: ['#0B0B0A', '#1C1914', '#B63A31', '#D6C08C'] },
+  { code: 'paper', name: 'Paper', description: 'Claro y descansado', swatches: ['#EFE8DA', '#FFF9EF', '#8E6A3C'] }
+];
+const THEME_CLASS_NAMES = THEME_PRESETS.map(preset => `theme-${preset.code}`);
 
 const STORAGE_KEY = 'rokaMindState';
 let state = JSON.parse(JSON.stringify(DEFAULT_STATE));
 let appInitialized = false;
 let calDate = new Date();
+let coachThreads = [];
+let activeCoachThreadId = '';
+let activeCoachMessages = [];
+let reportCache = [];
 
 function deepMerge(t, s) {
   const r = { ...t };
@@ -94,8 +123,12 @@ function normalizeState() {
   if (!state.aiReports) state.aiReports = [];
   if (!state.userProfile) state.userProfile = JSON.parse(JSON.stringify(DEFAULT_STATE.userProfile));
   if (!state.aiConfig) state.aiConfig = JSON.parse(JSON.stringify(DEFAULT_STATE.aiConfig));
-  if (!state.aiConfig.provider) state.aiConfig.provider = 'openai';
-  if (!state.aiConfig.model) state.aiConfig.model = 'gpt-4o';
+  delete state.aiConfig.apiKey;
+  delete state.aiConfig.provider;
+  delete state.aiConfig.model;
+  state.coachPreferences = deepMerge(DEFAULT_STATE.coachPreferences, state.coachPreferences || {});
+  state.onboarding = deepMerge(DEFAULT_STATE.onboarding, state.onboarding || {});
+  if (state.hasSeenOnboarding && state.onboarding.status === 'not_started') state.onboarding.status = 'completed';
   state.smartGoals = state.smartGoals.map(goal => ({
     progress: 0,
     nextStep: '',
@@ -172,6 +205,11 @@ function getCloudSafeState() {
   const cloudState = JSON.parse(JSON.stringify(state));
   cloudState.pendingCloudSync = false;
   delete cloudState.lastCloudSyncError;
+  if (cloudState.aiConfig) {
+    delete cloudState.aiConfig.apiKey;
+    delete cloudState.aiConfig.provider;
+    delete cloudState.aiConfig.model;
+  }
   return cloudState;
 }
 
@@ -204,43 +242,8 @@ async function loadState() {
     await saveState(true);
   }
   
-  // Si es un usuario nuevo (o no tiene bandera de bienvenida), mostrar onboarding
-  if (currentUser && !state.hasSeenOnboarding && !hasMeaningfulUserData(state)) {
-    state.hasSeenOnboarding = true;
-    // Cargar datos por defecto de ejemplo para que la app no inicie vacía
-    state.beliefs = [
-      { id: gid(), belief: "No tengo suficiente tiempo para mis metas", reframe: "Dedico 25 minutos de enfoque diario de calidad a lo que realmente importa", date: todayStr() }
-    ];
-    state.mantras = [
-      { id: gid(), text: "Dedico 25 minutos de enfoque diario de calidad a lo que realmente importa", date: todayStr() }
-    ];
-    state.victories = [
-      { id: gid(), content: "Comencé a usar ROKA MIND FOCUS para organizar mi claridad diaria", date: todayStr() }
-    ];
-    state.rituals = [
-      { id: gid(), name: "25 min Concentración Profunda", days: { lun: false, mar: false, mie: false, jue: false, vie: false, sab: false, dom: false } },
-      { id: gid(), name: "Planificar el Día", days: { lun: false, mar: false, mie: false, jue: false, vie: false, sab: false, dom: false } },
-      { id: gid(), name: "Agradecer / 3 Orgullos", days: { lun: false, mar: false, mie: false, jue: false, vie: false, sab: false, dom: false } }
-    ];
-    state.circleOfGiants = [
-      { id: gid(), name: "Roberto Iván Madrigal", role: "Creador de ROKA / Mentor", action: "Leer sus frases motivacionales en la app", status: "connected", lastContact: todayStr() }
-    ];
-    state.annualBig5 = [
-      "Establecer una rutina diaria zen de alto rendimiento",
-      "Leer 12 libros de crecimiento y enfoque personal",
-      "Mejorar mi puntuación en la Rueda de la Vida a un promedio de 8",
-      "Mantener mi racha de días activos por más de 30 días",
-      "Reconfigurar 10 creencias limitantes clave"
-    ];
-    await saveState(true);
-    
-    // Disparar tour guiado después de inicializar la app
-    setTimeout(() => {
-      startOnboardingTour();
-    }, 1200);
-  } else if (currentUser && !state.hasSeenOnboarding) {
-    state.hasSeenOnboarding = true;
-    await saveState(true);
+  if (currentUser && state.onboarding.status === 'not_started' && !hasMeaningfulUserData(state)) {
+    setTimeout(() => startOnboardingTour(), 700);
   }
 }
 
@@ -252,35 +255,8 @@ function loadLocalState() {
 }
 
 function applyFirstRunDefaultsIfNeeded() {
-  if (!currentUser || state.hasSeenOnboarding || hasMeaningfulUserData(state)) return false;
-  state.hasSeenOnboarding = true;
-  state.beliefs = [
-    { id: gid(), belief: "No tengo suficiente tiempo para mis metas", reframe: "Dedico 25 minutos de enfoque diario de calidad a lo que realmente importa", date: todayStr() }
-  ];
-  state.mantras = [
-    { id: gid(), text: "Dedico 25 minutos de enfoque diario de calidad a lo que realmente importa", date: todayStr() }
-  ];
-  state.victories = [
-    { id: gid(), content: "Comencé a usar ROKA MIND FOCUS para organizar mi claridad diaria", date: todayStr() }
-  ];
-  state.rituals = [
-    { id: gid(), name: "25 min Concentración Profunda", days: { lun: false, mar: false, mie: false, jue: false, vie: false, sab: false, dom: false } },
-    { id: gid(), name: "Planificar el Día", days: { lun: false, mar: false, mie: false, jue: false, vie: false, sab: false, dom: false } },
-    { id: gid(), name: "Agradecer / 3 Orgullos", days: { lun: false, mar: false, mie: false, jue: false, vie: false, sab: false, dom: false } }
-  ];
-  state.circleOfGiants = [
-    { id: gid(), name: "Roberto Iván Madrigal", role: "Creador de ROKA / Mentor", action: "Leer sus frases motivacionales en la app", status: "connected", lastContact: todayStr() }
-  ];
-  state.annualBig5 = [
-    "Establecer una rutina diaria zen de alto rendimiento",
-    "Leer 12 libros de crecimiento y enfoque personal",
-    "Mejorar mi puntuación en la Rueda de la Vida a un promedio de 8",
-    "Mantener mi racha de días activos por más de 30 días",
-    "Reconfigurar 10 creencias limitantes clave"
-  ];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  setTimeout(() => startOnboardingTour(), 1200);
-  saveState(true);
+  if (!currentUser || state.onboarding.status !== 'not_started' || hasMeaningfulUserData(state)) return false;
+  setTimeout(() => startOnboardingTour(), 700);
   return true;
 }
 
@@ -435,14 +411,35 @@ function hardenTouchTarget(el) {
   if (el.tagName === 'BUTTON' && !el.getAttribute('type')) el.setAttribute('type', 'button');
   el.addEventListener('contextmenu', event => event.preventDefault());
   el.addEventListener('selectstart', event => event.preventDefault());
-  el.addEventListener('pointerdown', () => {
-    const selection = window.getSelection && window.getSelection();
-    if (selection && selection.type === 'Range') selection.removeAllRanges();
-  });
+  el.addEventListener('pointerdown', clearAccidentalSelection);
+  el.addEventListener('pointerup', clearAccidentalSelection);
+  el.addEventListener('click', clearAccidentalSelection);
 }
 
 function hardenInteractiveTouchTargets() {
-  $$('button, [role="button"], .nav-item, .bottom-nav-item, .sub-nav-tabs .zen-btn').forEach(hardenTouchTarget);
+  $$('button, [role="button"], .nav-item, .bottom-nav-item, .sub-nav-tabs .zen-btn, .sub-nav-pills .zen-btn, .theme-preset-card').forEach(hardenTouchTarget);
+}
+
+function isEditableSelectionTarget(node) {
+  const el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  return Boolean(el?.closest?.('input, textarea, select, [contenteditable="true"]'));
+}
+
+function clearAccidentalSelection(event) {
+  if (isEditableSelectionTarget(event?.target)) return;
+  const selection = window.getSelection && window.getSelection();
+  if (selection && !selection.isCollapsed) selection.removeAllRanges();
+}
+
+function initSelectionGuard() {
+  document.addEventListener('selectionchange', () => {
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || selection.isCollapsed || isEditableSelectionTarget(selection.anchorNode)) return;
+    window.setTimeout(() => {
+      const current = window.getSelection && window.getSelection();
+      if (current && !current.isCollapsed && !isEditableSelectionTarget(current.anchorNode)) current.removeAllRanges();
+    }, 0);
+  });
 }
 
 // ─── AUTHENTICATION ───
@@ -472,7 +469,9 @@ function initAuth() {
     if (user) {
       currentUser = user;
       $('#auth-overlay').style.display = 'none';
-      $('#app').style.display = 'flex';
+      $('#app').style.display = 'grid';
+      const avatar = $('#profile-avatar-btn');
+      if (avatar) avatar.textContent = (user.displayName || user.email || 'R').trim().charAt(0).toUpperCase();
       updateAccountSyncStatus('saving');
       
       if(!$('#account-sync-status')) {
@@ -503,7 +502,10 @@ function initAuth() {
         renderAll();
       }
       updateAccountSyncStatus(state.pendingCloudSync ? 'pending' : 'synced');
-      reconcileCloudStateInBackground().then(() => syncPendingState());
+      reconcileCloudStateInBackground().then(async () => {
+        await syncPendingState();
+        await Promise.all([loadCoachThreads(), loadReports(), migrateLegacyReports()]);
+      });
     } else {
       currentUser = null;
       $('#auth-overlay').style.display = 'flex';
@@ -637,15 +639,46 @@ function unlockBadge(id) {
 
 // ─── TAB NAVIGATION ───
 const ROUTES = {
-  today: ['daily'],
-  mindset: ['mindset'],
-  strategy: ['strategy'],
-  reflection: ['reflection'],
-  identity: ['identity']
+  hoy: { section: 'daily', label: 'Hoy' },
+  coach: { section: 'coach', label: 'Coach' },
+  mente: { section: 'mindset', label: 'Mente' },
+  metas: { section: 'strategy', label: 'Metas' },
+  progreso: { section: 'reflection', label: 'Progreso' },
+  perfil: { section: 'identity', label: 'Perfil' }
 };
-const ROUTE_ORDER = ['today', 'mindset', 'strategy', 'reflection', 'identity'];
-const ROUTE_LABELS = { today: 'Hoy', mindset: 'Mentalidad', strategy: 'Estrategia', reflection: 'Reflexión', identity: 'Mi Base' };
-let activeRoute = 'today';
+const ROUTE_ALIASES = { today: 'hoy', daily: 'hoy', ai: 'coach', mindset: 'mente', strategy: 'metas', reflection: 'progreso', identity: 'perfil', profile: 'perfil' };
+const ROUTE_ORDER = ['hoy', 'coach', 'mente', 'metas', 'progreso', 'perfil'];
+let activeRoute = 'hoy';
+let coachOriginRoute = 'hoy';
+
+function normalizeRoute(route) {
+  const value = String(route || '').replace(/^#\/?/, '').split('/')[0].toLowerCase();
+  return ROUTES[value] ? value : (ROUTE_ALIASES[value] || 'hoy');
+}
+
+function routeFromHash() { return normalizeRoute(location.hash); }
+
+function activateHashSubroute(route) {
+  const subroute = location.hash.replace(/^#\//, '').split('/')[1] || '';
+  if (route === 'coach') {
+    showCoachView(subroute === 'informes' ? 'reports' : 'chat', false);
+  }
+  if (route === 'metas' && subroute) {
+    const map = { activas: 'strat-monthly', trimestre: 'strat-quarterly', vision: 'strat-vision' };
+    document.querySelector(`.strat-sub-tab[data-target="${map[subroute] || map.activas}"]`)?.click();
+  }
+  if (route === 'progreso' && subroute) {
+    const map = { resumen: 'reflection-progress', semana: 'reflection-weekly', calendario: 'reflection-calendar' };
+    document.querySelector(`.reflection-sub-tab[data-target="${map[subroute] || map.resumen}"]`)?.click();
+  }
+}
+
+function setRouteHash(route, subroute = '', replace = false) {
+  const nextHash = `#/${route}${subroute ? `/${subroute}` : ''}`;
+  if (location.hash === nextHash) return;
+  if (replace) history.replaceState({ route }, '', nextHash);
+  else history.pushState({ route }, '', nextHash);
+}
 
 function initTabs() {
   updateMobileViewportVars();
@@ -659,24 +692,19 @@ function initTabs() {
     b.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
-      switchTab(b.dataset.tab);
+      switchTab(b.dataset.route || b.dataset.tab, { focus: true });
     });
   });
   $$('.route-link-btn').forEach(b => {
     b.addEventListener('click', () => {
       const target = b.dataset.routeTarget;
-      if (target === 'ai') {
-        switchTab('mindset');
-        setTimeout(() => {
-          const aiSubTab = document.querySelector('.mindset-sub-tab[data-target="mindset-diagnostics"]');
-          if (aiSubTab) aiSubTab.click();
-        }, 100); // Wait for tab to switch
-      } else {
-        switchTab(target);
-      }
+      switchTab(target === 'ai' ? 'coach' : target, { focus: true });
     });
   });
   if ($('#generate-daily-route-btn')) $('#generate-daily-route-btn').addEventListener('click', generateDailyAIRoute);
+  $('#coach-fab')?.addEventListener('click', () => switchTab('coach', { focus: true }));
+  $('#profile-avatar-btn')?.addEventListener('click', () => switchTab('perfil', { focus: true }));
+  window.addEventListener('hashchange', () => switchTab(routeFromHash(), { updateHash: false }));
 
   $$('.strat-sub-tab').forEach(b => {
     b.addEventListener('click', () => {
@@ -691,22 +719,7 @@ function initTabs() {
         tc.classList.add('active');
         tc.style.display = 'block';
       }
-    });
-  });
-
-  $$('.mindset-sub-tab').forEach(b => {
-    b.addEventListener('click', () => {
-      $$('.mindset-sub-tab').forEach(x => { x.classList.remove('active'); x.style.color = 'var(--text-secondary)'; x.style.fontWeight = 'normal'; });
-      $$('.mindset-sub-content').forEach(c => { c.classList.remove('active'); c.style.display = 'none'; });
-      b.classList.add('active');
-      b.style.color = 'var(--accent-gold)';
-      b.style.fontWeight = 'bold';
-      const target = b.dataset.target;
-      const tc = $(`#${target}`);
-      if (tc) {
-        tc.classList.add('active');
-        tc.style.display = 'block';
-      }
+      setRouteHash('metas', b.dataset.subroute || (target === 'strat-quarterly' ? 'trimestre' : target === 'strat-vision' ? 'vision' : 'activas'));
     });
   });
 
@@ -723,22 +736,8 @@ function initTabs() {
         tc.classList.add('active');
         tc.style.display = 'block';
       }
-    });
-  });
-
-  $$('.identity-sub-tab').forEach(b => {
-    b.addEventListener('click', () => {
-      $$('.identity-sub-tab').forEach(x => { x.classList.remove('active'); x.style.color = 'var(--text-secondary)'; x.style.fontWeight = 'normal'; });
-      $$('.identity-sub-content').forEach(c => { c.classList.remove('active'); c.style.display = 'none'; });
-      b.classList.add('active');
-      b.style.color = 'var(--accent-gold)';
-      b.style.fontWeight = 'bold';
-      const target = b.dataset.target;
-      const tc = $(`#${target}`);
-      if (tc) {
-        tc.classList.add('active');
-        tc.style.display = 'block';
-      }
+      const subroute = target === 'reflection-weekly' ? 'semana' : target === 'reflection-calendar' ? 'calendario' : 'resumen';
+      setRouteHash('progreso', subroute);
     });
   });
 }
@@ -760,25 +759,29 @@ function updateClarityPanel() {
   }
 }
 
-function switchTab(t) {
-  activeRoute = ROUTES[t] ? t : activeRoute;
-  const sections = ROUTES[t] || [t];
-  
+function switchTab(t, options = {}) {
+  const route = normalizeRoute(t);
+  const config = ROUTES[route];
+  if (route === 'coach' && activeRoute !== 'coach') coachOriginRoute = activeRoute;
+  activeRoute = route;
   $$('.nav-item, .bottom-nav-item').forEach(b => b.classList.remove('active'));
   $$('.tab-content').forEach(c => c.classList.remove('active'));
-  
-  const btns = $$(`.nav-item[data-tab="${t}"], .bottom-nav-item[data-tab="${t}"]`);
-  if (btns) btns.forEach(b => b.classList.add('active'));
-  
-  sections.forEach(section => {
-    const ct = $(`#tab-${section}`);
-    if (ct) { 
-      ct.classList.add('active');
-      // Removed .stagger-in and offsetHeight reflows that caused complete UI freezing
-    }
+  const btns = $$(`[data-route="${route}"]`);
+  btns.forEach(b => {
+    b.classList.add('active');
+    b.setAttribute('aria-current', 'page');
   });
-  
-  window.scrollTo({ top: 0 }); // Instant scroll, no smooth behavior
+  $$('[data-route]').forEach(b => { if (!b.classList.contains('active')) b.removeAttribute('aria-current'); });
+  const section = $(`#tab-${config.section}`);
+  if (section) section.classList.add('active');
+  document.title = `${config.label} — ROKA Mind Focus`;
+  if (options.updateHash !== false) setRouteHash(route, '', options.replace === true);
+  else activateHashSubroute(route);
+  window.scrollTo({ top: 0 });
+  if (options.focus) {
+    const heading = section?.querySelector('h1');
+    if (heading) { heading.setAttribute('tabindex', '-1'); heading.focus({ preventScroll: true }); }
+  }
 }
 
 function moveRoute(direction) {
@@ -1603,7 +1606,15 @@ function initProfile() {
   if (btn) btn.addEventListener('click', saveProfile);
   
   const aiBtn = $('#save-ai-btn');
-  if (aiBtn) aiBtn.addEventListener('click', saveAIConfig);
+  if (aiBtn) aiBtn.addEventListener('click', () => saveAIConfig('modal'));
+  $('#save-ai-key-session-btn')?.addEventListener('click', () => saveAIKeyForSession('modal'));
+  $('#test-ai-connection-btn')?.addEventListener('click', () => testAIConnection('modal'));
+  $('#clear-ai-key-btn')?.addEventListener('click', clearAIKeyForSession);
+  $('#ai-provider')?.addEventListener('change', syncAIModelDefault);
+  $('#profile-save-ai-key-btn')?.addEventListener('click', () => saveAIKeyForSession('profile'));
+  $('#profile-test-ai-connection-btn')?.addEventListener('click', () => testAIConnection('profile'));
+  $('#profile-clear-ai-key-btn')?.addEventListener('click', clearAIKeyForSession);
+  $('#profile-ai-provider')?.addEventListener('change', syncAIModelDefault);
   
   $$('.ai-report-btn').forEach(b => b.addEventListener('click', () => generateAIReport(b.dataset.type)));
 
@@ -1620,6 +1631,32 @@ function initProfile() {
   if (closeAiBtn && aiSettingsModal) {
     closeAiBtn.addEventListener('click', () => aiSettingsModal.style.display = 'none');
   }
+  $('#open-ai-connection-profile-btn')?.addEventListener('click', () => $('#settings-toggle-btn')?.click());
+  $('#restart-onboarding-btn')?.addEventListener('click', () => startOnboardingTour(true));
+  $('#open-advanced-settings-btn')?.addEventListener('click', () => $('#settings-toggle-btn')?.click());
+  $('#export-data-btn')?.addEventListener('click', () => {
+    const payload = JSON.stringify(getCloudSafeState(), null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `roka-datos-${todayStr()}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    showToast('Copia de datos preparada');
+  });
+  $('#profile-context-core')?.addEventListener('change', event => {
+    state.coachPreferences.useCoreContext = event.target.checked;
+    saveState();
+  });
+  $('#profile-context-sensitive')?.addEventListener('change', event => {
+    state.coachPreferences.useSensitiveContext = event.target.checked;
+    saveState();
+  });
+  $('#profile-coach-style')?.addEventListener('change', event => {
+    state.coachPreferences.style = event.target.value;
+    saveState();
+  });
+  renderThemePresets();
 
   const editProfileBtn = $('#edit-profile-btn');
   const profileCard = $('#profile-card');
@@ -1655,14 +1692,25 @@ function saveProfile() {
   if (btn) btn.style.display = 'none';
 }
 
-function saveAIConfig() {
-  if (!state.aiConfig) state.aiConfig = { provider: '', model: '', apiKey: '', prompt: '' };
-  state.aiConfig.provider = $('#ai-provider').value;
-  state.aiConfig.model = $('#ai-model').value;
-  state.aiConfig.apiKey = $('#ai-apikey').value;
-  state.aiConfig.prompt = $('#ai-prompt').value;
+function saveAIConfig(source = 'modal') {
+  if (!state.aiConfig) state.aiConfig = { prompt: '' };
+  state.aiConfig.prompt = $('#ai-prompt')?.value.trim() || '';
+  state.coachPreferences.useCoreContext = $('#ai-context-core')?.checked !== false;
+  state.coachPreferences.useSensitiveContext = $('#ai-context-sensitive')?.checked === true;
+  saveAIConnectionFields(source);
+  const { keyEl } = getAIFormFields(source);
+  const typedKey = keyEl?.value.trim() || '';
+  if (typedKey) {
+    storeAIKey(typedKey);
+    if (keyEl) keyEl.value = '';
+  }
+  delete state.aiConfig.apiKey;
+  delete state.aiConfig.provider;
+  delete state.aiConfig.model;
   saveState();
-  showToast('Configuración de IA guardada');
+  $('#ai-settings-modal').style.display = 'none';
+  renderProfile();
+  showToast('Preferencias del Coach guardadas');
 }
 
 function renderProfile() {
@@ -1678,14 +1726,26 @@ function renderProfile() {
   if($('#profile-birth-date')) $('#profile-birth-date').value = p.birthDate || '';
   if($('#profile-birth-time')) $('#profile-birth-time').value = p.birthTime || '';
   if($('#profile-birth-place')) $('#profile-birth-place').value = p.birthPlace || '';
+  requestAnimationFrame(() => {
+    $$('#profile-card textarea').forEach(area => {
+      area.style.height = 'auto';
+      area.style.height = `${Math.max(44, area.scrollHeight)}px`;
+    });
+  });
   
-  if(typeof renderAIReportsList === 'function') renderAIReportsList();
-  
-  if (!state.aiConfig) state.aiConfig = { provider: '', model: '', apiKey: '', prompt: '' };
-  if($('#ai-provider')) $('#ai-provider').value = state.aiConfig.provider || '';
-  if($('#ai-model')) $('#ai-model').value = state.aiConfig.model || '';
-  if($('#ai-apikey')) $('#ai-apikey').value = state.aiConfig.apiKey || '';
+  if (!state.aiConfig) state.aiConfig = { prompt: '' };
   if($('#ai-prompt')) $('#ai-prompt').value = state.aiConfig.prompt || '';
+  const provider = getAIProvider();
+  syncAIConnectionFormFields(provider, getAIModel(provider));
+  if($('#ai-api-key')) $('#ai-api-key').value = '';
+  if($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
+  updateAIConnectionStatus();
+  if($('#ai-context-core')) $('#ai-context-core').checked = state.coachPreferences.useCoreContext !== false;
+  if($('#ai-context-sensitive')) $('#ai-context-sensitive').checked = state.coachPreferences.useSensitiveContext === true;
+  if($('#profile-context-core')) $('#profile-context-core').checked = state.coachPreferences.useCoreContext !== false;
+  if($('#profile-context-sensitive')) $('#profile-context-sensitive').checked = state.coachPreferences.useSensitiveContext === true;
+  if($('#profile-coach-style')) $('#profile-coach-style').value = state.coachPreferences.style || 'direct';
+  renderThemePresets();
   
   if ($('#profile-xp-total')) $('#profile-xp-total').textContent = `${state.gamification ? state.gamification.xp : 0} XP Total`;
   
@@ -1864,11 +1924,6 @@ ${buildWholeAppContext()}`;
 
 async function generateDailyAIRoute() {
   const status = getUserJourneyStatus();
-  if (!state.aiConfig?.provider) {
-    showSaveStatus('empty', 'Configura un proveedor de IA en Perfil.');
-    switchTab('profile');
-    return;
-  }
   if (status.score < 20) showSaveStatus('empty');
   const prompt = `Con este contexto de la app, crea una Ruta Zen para hoy. Debe ser breve, accionable y priorizada.
 
@@ -1884,11 +1939,10 @@ Formato obligatorio:
     showSaveStatus('ai');
     const response = await callAI(prompt, 'Eres un coach central de vida, productividad y enfoque. Tono ryokan: sobrio, claro, directo, sin motivacion generica.');
     const report = { id: gid(), type: 'daily-route', title: 'Ruta Zen de Hoy', content: response, date: todayStr() };
-    state.aiReports.unshift(report);
-    await saveState();
-    renderAIReportsList();
+    await saveAIReport(report);
     renderJourneyStatus();
-    switchTab('ai');
+    switchTab('coach');
+    showCoachView('reports');
     showToast('Ruta de hoy generada');
   } catch(e) {
     showSaveStatus('error', e.message);
@@ -1896,11 +1950,6 @@ Formato obligatorio:
 }
 
 async function generateWeeklyReview() {
-  if (!state.aiConfig?.provider) {
-    showSaveStatus('empty', 'Configura un proveedor de IA en Perfil.');
-    switchTab('profile');
-    return;
-  }
   const prompt = `Genera una revision semanal accionable a partir del sistema ROKA.
 
 ${getTodayRecommendationContext()}
@@ -1915,10 +1964,9 @@ Formato obligatorio:
     showSaveStatus('ai');
     const response = await callAI(prompt, 'Eres un estratega semanal. Lee patrones, contradicciones y siguiente accion. Nada de relleno.');
     const report = { id: gid(), type: 'weekly-review', title: 'Revision Semanal IA', content: response, date: todayStr() };
-    state.aiReports.unshift(report);
-    await saveState();
-    renderAIReportsList();
-    switchTab('ai');
+    await saveAIReport(report);
+    switchTab('coach');
+    showCoachView('reports');
     showToast('Revisión semanal generada');
   } catch(e) {
     showSaveStatus('error', e.message);
@@ -1927,17 +1975,202 @@ Formato obligatorio:
 
 // ─── AI INTEGRATION ───
 async function callAI(prompt, systemInstruction = '') {
-  if (!state.aiConfig || !state.aiConfig.provider) throw new Error('No hay proveedor de IA configurado.');
-  const { provider, model, apiKey } = state.aiConfig;
   const sysPrompt = state.aiConfig.prompt ? state.aiConfig.prompt + '\n' + systemInstruction : systemInstruction;
-
-  showToast('Conectando con ' + provider.toUpperCase() + '...');
+  if (!currentUser) throw new Error('Inicia sesión para usar el Coach.');
+  showToast('Coach ROKA está pensando...');
   try {
-    if (provider !== 'ollama' && !apiKey) {
-      return await callAIGateway({ provider, model, prompt, systemInstruction: sysPrompt, userPrompt: state.aiConfig.prompt || '' });
-    }
-    return await callAIProvider({ provider, model, apiKey, prompt, systemInstruction: sysPrompt });
+    const authToken = await currentUser.getIdToken();
+    const result = await callAIGateway({ mode: 'report', prompt, systemInstruction: sysPrompt, authToken, ...getAIConnectionConfig() });
+    return result.text;
   } catch (error) { throw new Error('Error de conexión IA: ' + error.message); }
+}
+
+function getAIProvider() {
+  const stored = localStorage.getItem(AI_PROVIDER_KEY);
+  return AI_PROVIDER_DEFAULTS[stored] ? stored : 'openai';
+}
+
+function getAIModel(provider = getAIProvider()) {
+  const stored = localStorage.getItem(AI_MODEL_KEY);
+  return stored || AI_PROVIDER_DEFAULTS[provider] || AI_PROVIDER_DEFAULTS.openai;
+}
+
+function getAIConnectionConfig() {
+  const provider = getAIProvider();
+  return {
+    provider,
+    model: getAIModel(provider),
+    clientApiKey: getStoredAIKey()
+  };
+}
+
+function getStoredAIKey() {
+  return sessionStorage.getItem(AI_SESSION_KEY) || localStorage.getItem(AI_SESSION_KEY) || '';
+}
+
+function storeAIKey(key) {
+  sessionStorage.setItem(AI_SESSION_KEY, key);
+  localStorage.setItem(AI_SESSION_KEY, key);
+}
+
+function clearStoredAIKey() {
+  sessionStorage.removeItem(AI_SESSION_KEY);
+  localStorage.removeItem(AI_SESSION_KEY);
+}
+
+function updateAIConnectionStatus(message = '') {
+  const hasKey = Boolean(getStoredAIKey());
+  const provider = getAIProvider();
+  const model = getAIModel(provider);
+  const route = provider === 'openai'
+    ? 'ruta: gateway /api/ai'
+    : `ruta: directo ${provider === 'google' ? 'Gemini' : 'DeepSeek'}`;
+  const text = message || (hasKey
+    ? `Clave IA guardada. Proveedor: ${provider}. Modelo: ${model}. ${route}.`
+    : `Falta API key o backend activo. Proveedor: ${provider}. Modelo: ${model}.`);
+  ['#ai-connection-status', '#profile-ai-connection-status'].forEach(selector => {
+    const status = $(selector);
+    if (status) status.textContent = text;
+  });
+}
+
+function syncAIModelDefault(event) {
+  const providerEl = event?.target || $('#ai-provider') || $('#profile-ai-provider');
+  const modelEl = providerEl?.id === 'profile-ai-provider' ? $('#profile-ai-model') : $('#ai-model');
+  if (!providerEl || !modelEl) return;
+  const provider = AI_PROVIDER_DEFAULTS[providerEl.value] ? providerEl.value : 'openai';
+  modelEl.value = AI_PROVIDER_DEFAULTS[provider];
+  localStorage.setItem(AI_PROVIDER_KEY, provider);
+  localStorage.setItem(AI_MODEL_KEY, modelEl.value);
+  syncAIConnectionFormFields(provider, modelEl.value);
+  updateAIConnectionStatus(provider === 'openai'
+    ? 'OpenAI usa el gateway /api/ai. Si Firebase Functions no está desplegado, prueba con Google Gemini o DeepSeek.'
+    : '');
+}
+
+function getAIFormFields(source = 'profile') {
+  const prefix = source === 'modal' ? 'ai' : 'profile-ai';
+  return {
+    providerEl: $(`#${prefix}-provider`),
+    modelEl: $(`#${prefix}-model`),
+    keyEl: $(`#${prefix}-api-key`)
+  };
+}
+
+function saveAIConnectionFields(source = 'profile') {
+  const { providerEl, modelEl } = getAIFormFields(source);
+  const provider = providerEl?.value || getAIProvider();
+  const safeProvider = AI_PROVIDER_DEFAULTS[provider] ? provider : 'openai';
+  const model = modelEl?.value.trim() || AI_PROVIDER_DEFAULTS[safeProvider];
+  localStorage.setItem(AI_PROVIDER_KEY, safeProvider);
+  localStorage.setItem(AI_MODEL_KEY, model);
+  syncAIConnectionFormFields(safeProvider, model);
+  return { provider: safeProvider, model };
+}
+
+function syncAIConnectionFormFields(provider = getAIProvider(), model = getAIModel(provider)) {
+  if ($('#ai-provider')) $('#ai-provider').value = provider;
+  if ($('#ai-model')) $('#ai-model').value = model;
+  if ($('#profile-ai-provider')) $('#profile-ai-provider').value = provider;
+  if ($('#profile-ai-model')) $('#profile-ai-model').value = model;
+  if (provider === 'openai') {
+    updateAIConnectionStatus('OpenAI usa el gateway /api/ai. Si Firebase Functions no está desplegado, prueba con Google Gemini o DeepSeek.');
+  } else {
+    updateAIConnectionStatus();
+  }
+}
+
+function saveAIKeyForSession(source = 'profile') {
+  const config = saveAIConnectionFields(source);
+  const { keyEl } = getAIFormFields(source);
+  const key = keyEl?.value.trim() || '';
+  if (!key) {
+    showToast('Pega una API key para guardarla');
+    return;
+  }
+  storeAIKey(key);
+  if ($('#ai-api-key')) $('#ai-api-key').value = '';
+  if ($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
+  const route = config.provider === 'openai' ? 'gateway /api/ai' : `directo ${config.provider === 'google' ? 'Gemini' : 'DeepSeek'}`;
+  updateAIConnectionStatus(`Clave IA guardada. Proveedor: ${config.provider}. Modelo: ${config.model}. Ruta: ${route}.`);
+  showToast('Clave IA guardada');
+}
+
+function clearAIKeyForSession() {
+  clearStoredAIKey();
+  if ($('#ai-api-key')) $('#ai-api-key').value = '';
+  if ($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
+  updateAIConnectionStatus();
+  showToast('Clave IA borrada de la sesión');
+}
+
+async function testAIConnection(source = 'profile') {
+  if (!currentUser) { showToast('Inicia sesión para probar la IA'); return; }
+  saveAIConnectionFields(source);
+  const { keyEl } = getAIFormFields(source);
+  const typedKey = keyEl?.value.trim() || '';
+  const config = { ...getAIConnectionConfig(), clientApiKey: typedKey || getStoredAIKey() };
+  try {
+    showToast('Probando conexión IA...');
+    const authToken = await currentUser.getIdToken();
+    const result = await callAIGateway({
+      mode: 'chat',
+      authToken,
+      messages: [{ role: 'user', content: 'Responde solamente: conexion ok' }],
+      context: 'Prueba tecnica breve de conexion IA.',
+      systemInstruction: 'Responde en español, con dos palabras como maximo.',
+      ...config
+    });
+    if (typedKey) {
+      storeAIKey(typedKey);
+      if ($('#ai-api-key')) $('#ai-api-key').value = '';
+      if ($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
+    }
+    const route = result.route || (config.provider === 'openai' ? 'gateway /api/ai' : `directo ${config.provider}`);
+    updateAIConnectionStatus(`Conexión IA verificada. Proveedor: ${config.provider}. Modelo: ${config.model}. Ruta usada: ${route}.`);
+    showToast('Conexión IA lista');
+  } catch (error) {
+    updateAIConnectionStatus('No se pudo conectar: ' + error.message);
+    showToast('Error IA: ' + error.message);
+  }
+}
+
+function applyThemePreset(presetCode = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden', persist = false) {
+  const preset = THEME_PRESETS.some(item => item.code === presetCode) ? presetCode : 'zen-garden';
+  document.body.classList.remove(...THEME_CLASS_NAMES);
+  document.body.classList.add(`theme-${preset}`);
+  if (preset === 'paper') {
+    document.body.classList.add('light-theme');
+    localStorage.setItem('rokaLightTheme', 'true');
+    const btn = $('#theme-toggle-btn');
+    if (btn) btn.textContent = '◑';
+  } else if (persist) {
+    document.body.classList.remove('light-theme');
+    localStorage.setItem('rokaLightTheme', 'false');
+    const btn = $('#theme-toggle-btn');
+    if (btn) btn.textContent = '◐';
+  }
+  if (persist) localStorage.setItem(THEME_PRESET_KEY, preset);
+  renderThemePresets();
+}
+
+function renderThemePresets() {
+  const container = $('#theme-preset-grid');
+  if (!container) return;
+  const active = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden';
+  container.innerHTML = THEME_PRESETS.map(preset => `
+    <button class="theme-preset-card ${active === preset.code ? 'active' : ''}" type="button" data-theme-preset="${esc(preset.code)}" aria-pressed="${active === preset.code}">
+      <span class="theme-preset-swatches">${preset.swatches.map(color => `<i style="background:${esc(color)}"></i>`).join('')}</span>
+      <b>${esc(preset.name)}</b>
+      <small>${esc(preset.description)}</small>
+    </button>
+  `).join('');
+  container.querySelectorAll('[data-theme-preset]').forEach(button => {
+    button.addEventListener('click', () => {
+      applyThemePreset(button.dataset.themePreset, true);
+      showToast('Paleta visual actualizada');
+    });
+  });
 }
 
 async function generateAIReport(type) {
@@ -1961,9 +2194,7 @@ async function generateAIReport(type) {
     const response = await callAI(prompt, 'Eres un maestro Zen, astrólogo experto y psicólogo profundo. Responde siempre en formato Markdown, con un tono sabio, claro y revelador. Mantén el formato ordenado y profundo.');
     const report = { id: gid(), type, title, content: response, date: todayStr() };
     if(!state.aiReports) state.aiReports = [];
-    state.aiReports.unshift(report);
-    saveState();
-    renderAIReportsList();
+    await saveAIReport(report);
     showToast('Reporte generado con éxito');
   } catch(e) { showToast(e.message); }
 }
@@ -1998,14 +2229,26 @@ ${context}
 
 Solicitud:
 ${ask}
+
+Formato obligatorio en Markdown:
+## Resumen ejecutivo
+Tres frases claras y específicas.
+## Hallazgos
+De tres a cinco hallazgos vinculados con los datos disponibles.
+## Evidencia utilizada
+Indica qué datos de ROKA sustentan la lectura y qué información falta.
+## Plan de acción
+Tres acciones concretas, priorizadas y medibles.
+## Siguiente paso
+Una sola acción que pueda comenzar hoy en menos de 25 minutos.
+
+No presentes inferencias psicológicas, de personalidad o astrológicas como diagnóstico clínico o hecho comprobado.
 `;
   try {
     const response = await callAI(prompt, 'Eres un estratega de vida y productividad con tono sobrio, preciso y práctico. Responde en español, con secciones claras y pasos concretos.');
     const report = { id: gid(), type: 'map-' + type, title, content: response, date: todayStr() };
     if(!state.aiReports) state.aiReports = [];
-    state.aiReports.unshift(report);
-    saveState();
-    renderAIReportsList();
+    await saveAIReport(report);
     showToast('Informe generado');
   } catch(e) { showToast('Error IA: ' + e.message); }
 }
@@ -2034,34 +2277,301 @@ Mantras: ${(state.mantras || []).map(m=>m.text).join(' | ') || 'Sin mantras'}
 Creencias reconfiguradas: ${(state.beliefs || []).map(b=>`${b.belief} -> ${b.reframe}`).join(' | ') || 'Sin creencias'}`;
 }
 
-function renderAIReportsList() {
-  const containers = ['#ai-reports-list', '#map-reports-list'].map(sel => $(sel)).filter(Boolean);
-  if(!containers.length) return;
-  if(!state.aiReports || !state.aiReports.length) {
-    containers.forEach(container => container.innerHTML = '<div class="empty-state"><div class="empty-state-text" style="font-size:0.8rem;color:var(--text-muted);">No has generado reportes aún.</div></div>');
+function showCoachView(view = 'chat', updateHash = true) {
+  const isChat = view === 'chat';
+  $('#coach-chat-view')?.toggleAttribute('hidden', !isChat);
+  $('#coach-reports-view')?.toggleAttribute('hidden', isChat);
+  $$('.coach-view-tabs [data-coach-view]').forEach(button => {
+    const active = button.dataset.coachView === view;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  if (updateHash) setRouteHash('coach', isChat ? 'chat' : 'informes');
+  if (!isChat) renderAIReportsList();
+}
+
+function coachThreadRef(threadId) {
+  return doc(db, 'users', currentUser.uid, 'chatThreads', threadId);
+}
+
+async function createCoachThread() {
+  const now = new Date().toISOString();
+  const thread = { id: gid(), title: 'Nueva conversación', createdAt: now, updatedAt: now };
+  coachThreads = [thread, ...coachThreads];
+  activeCoachThreadId = thread.id;
+  activeCoachMessages = [];
+  renderCoachThreads();
+  renderCoachMessages();
+  if (currentUser) await setDoc(coachThreadRef(thread.id), thread).catch(error => console.warn('Conversación local pendiente.', error));
+  $('#coach-input')?.focus();
+  return thread;
+}
+
+async function loadCoachThreads() {
+  if (!currentUser) return;
+  try {
+    const threadsRef = collection(db, 'users', currentUser.uid, 'chatThreads');
+    const snapshot = await getDocs(query(threadsRef, orderBy('updatedAt', 'desc'), limit(30)));
+    coachThreads = snapshot.docs.map(item => item.data());
+  } catch (error) {
+    console.warn('No se pudo cargar el historial del Coach.', error);
+  }
+  renderCoachThreads();
+  if (coachThreads.length && !activeCoachThreadId) await openCoachThread(coachThreads[0].id);
+}
+
+async function openCoachThread(threadId) {
+  activeCoachThreadId = threadId;
+  const thread = coachThreads.find(item => item.id === threadId);
+  if ($('#coach-thread-title')) $('#coach-thread-title').textContent = thread?.title || 'Conversación';
+  renderCoachThreads();
+  if (!currentUser) { activeCoachMessages = []; renderCoachMessages(); return; }
+  try {
+    const messagesRef = collection(db, 'users', currentUser.uid, 'chatThreads', threadId, 'messages');
+    const snapshot = await getDocs(query(messagesRef, orderBy('createdAt', 'asc'), limit(100)));
+    activeCoachMessages = snapshot.docs.map(item => item.data());
+  } catch (error) {
+    activeCoachMessages = [];
+    console.warn('No se pudieron cargar los mensajes.', error);
+  }
+  renderCoachMessages();
+}
+
+function renderCoachThreads() {
+  const container = $('#coach-thread-list');
+  if (!container) return;
+  container.innerHTML = coachThreads.length ? coachThreads.map(thread => `<button class="coach-thread-item ${thread.id === activeCoachThreadId ? 'active' : ''}" data-thread-id="${esc(thread.id)}">${esc(thread.title)}</button>`).join('') : '<p class="coach-privacy-note">Aquí aparecerán tus conversaciones.</p>';
+  container.querySelectorAll('[data-thread-id]').forEach(button => button.addEventListener('click', () => openCoachThread(button.dataset.threadId)));
+}
+
+function renderCoachMessages() {
+  const container = $('#coach-messages');
+  if (!container) return;
+  if (!activeCoachMessages.length) {
+    container.innerHTML = `<div class="coach-welcome"><div class="coach-mark">R</div><h3>¿Qué necesitas resolver?</h3><p>Puedo ayudarte a elegir una prioridad, convertir una idea en meta o revisar por qué te estás deteniendo.</p><div class="coach-starters"><button data-coach-prompt="Ayúdame a elegir la acción más importante para hoy.">Priorizar mi día</button><button data-coach-prompt="Revisa mis metas y dime cuál necesita atención primero.">Revisar mis metas</button><button data-coach-prompt="Estoy bloqueado. Hazme preguntas para encontrar el siguiente paso.">Salir de un bloqueo</button></div></div>`;
+  } else {
+    container.innerHTML = activeCoachMessages.map(message => `<div class="coach-message ${message.role}${message.failed ? ' failed' : ''}"><div class="coach-message-bubble">${esc(message.content)}${message.role === 'assistant' ? `<div class="coach-message-actions">${message.failed ? `<button data-message-action="retry" data-message-id="${message.id}">Reintentar</button>` : `<button data-message-action="task" data-message-id="${message.id}">Guardar como tarea</button><button data-message-action="goal" data-message-id="${message.id}">Convertir en meta</button>`}</div>` : ''}</div></div>`).join('');
+  }
+  container.querySelectorAll('[data-coach-prompt]').forEach(button => button.addEventListener('click', () => {
+    $('#coach-input').value = button.dataset.coachPrompt;
+    $('#coach-input').focus();
+  }));
+  container.querySelectorAll('[data-message-action]').forEach(button => button.addEventListener('click', () => saveCoachMessageAs(button.dataset.messageAction, button.dataset.messageId)));
+  container.scrollTop = container.scrollHeight;
+}
+
+async function persistCoachMessage(message) {
+  if (!currentUser || !activeCoachThreadId) return;
+  await setDoc(doc(db, 'users', currentUser.uid, 'chatThreads', activeCoachThreadId, 'messages', message.id), message);
+}
+
+function buildCoachContext() {
+  if (state.coachPreferences.useCoreContext === false || $('#coach-use-context')?.checked === false) return 'El usuario decidió no compartir contexto de la app en esta conversación.';
+  let context = `Pantalla de origen: ${ROUTES[coachOriginRoute]?.label || 'Hoy'}\n${getTodayRecommendationContext()}`;
+  if (state.coachPreferences.useSensitiveContext) {
+    context += `\nContexto sensible autorizado:\nMiedos o bloqueos: ${state.userProfile?.fears || 'Sin datos'}\nHistoria personal: ${state.userProfile?.lifeHistory || 'Sin datos'}\nNacimiento: ${state.userProfile?.birthDate || 'Sin datos'} ${state.userProfile?.birthPlace || ''}`;
+  }
+  return context;
+}
+
+async function sendCoachMessage(text) {
+  const content = String(text || '').trim();
+  if (!content || !currentUser) return;
+  if (!activeCoachThreadId) await createCoachThread();
+  const now = new Date().toISOString();
+  const userMessage = { id: gid(), role: 'user', content, createdAt: now };
+  activeCoachMessages.push(userMessage);
+  renderCoachMessages();
+  await persistCoachMessage(userMessage).catch(() => {});
+
+  const thread = coachThreads.find(item => item.id === activeCoachThreadId);
+  if (thread && thread.title === 'Nueva conversación') thread.title = content.slice(0, 52);
+  if (thread) {
+    thread.updatedAt = now;
+    await setDoc(coachThreadRef(thread.id), thread).catch(() => {});
+    if ($('#coach-thread-title')) $('#coach-thread-title').textContent = thread.title;
+    renderCoachThreads();
+  }
+
+  await requestCoachReply();
+}
+
+async function requestCoachReply() {
+  const sendButton = $('#coach-send-btn');
+  const form = $('#coach-form');
+  if (sendButton) { sendButton.disabled = true; sendButton.textContent = 'Pensando…'; }
+  form?.setAttribute('aria-busy', 'true');
+  try {
+    const authToken = await currentUser.getIdToken();
+    const messages = activeCoachMessages.filter(message => !message.failed).slice(-16).map(({ role, content: body }) => ({ role, content: body }));
+    const response = await callAIGateway({
+      mode: 'chat', authToken, messages, context: buildCoachContext(),
+      systemInstruction: `Eres el Coach de ejecución de ROKA. Responde en español, con claridad, sin motivación genérica. Estilo: ${state.coachPreferences.style}. Termina con una acción concreta y breve.`,
+      ...getAIConnectionConfig()
+    });
+    const assistantMessage = { id: gid(), role: 'assistant', content: response.text, usage: response.usage, createdAt: new Date().toISOString() };
+    activeCoachMessages.push(assistantMessage);
+    await persistCoachMessage(assistantMessage).catch(() => {});
+  } catch (error) {
+    activeCoachMessages.push({ id: gid(), role: 'assistant', content: `No pude responder ahora. ${error.message}\n\nPuedes intentarlo de nuevo en unos momentos.`, createdAt: new Date().toISOString(), failed: true });
+  } finally {
+    if (sendButton) { sendButton.disabled = false; sendButton.textContent = 'Enviar'; }
+    form?.removeAttribute('aria-busy');
+    renderCoachMessages();
+  }
+}
+
+function saveCoachMessageAs(type, messageId) {
+  const message = activeCoachMessages.find(item => item.id === messageId);
+  if (!message) return;
+  if (type === 'retry') {
+    activeCoachMessages = activeCoachMessages.filter(item => item.id !== messageId);
+    renderCoachMessages();
+    requestCoachReply();
+  } else if (type === 'task') {
+    if (!confirm('¿Guardar esta recomendación como tarea para hoy?')) return;
+    const today = todayStr();
+    if (!state.dailyTasks[today]) state.dailyTasks[today] = [];
+    state.dailyTasks[today].push({ id: gid(), text: message.content.slice(0, 240), priority: 'high', completed: false });
+    saveState(); renderPlanner(); showToast('Tarea añadida a Hoy');
+  } else if (type === 'goal') {
+    if (!confirm('¿Convertir esta recomendación en una meta activa?')) return;
+    state.smartGoals.push({ id: gid(), goal: message.content.slice(0, 180), measurable: '', achievable: true, relevance: 'Creada desde el Coach', duration: 30, progress: 0, nextStep: '', startDate: todayStr(), completed: false });
+    saveState(); renderSmartGoals(); showToast('Meta creada');
+  }
+}
+
+function initCoach() {
+  $$('.coach-view-tabs [data-coach-view]').forEach(button => button.addEventListener('click', () => showCoachView(button.dataset.coachView)));
+  $('#new-chat-btn')?.addEventListener('click', createCoachThread);
+  $('#new-chat-hero-btn')?.addEventListener('click', () => { showCoachView('chat'); createCoachThread(); });
+  $('#coach-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    const input = $('#coach-input');
+    const value = input.value;
+    input.value = '';
+    input.style.height = '';
+    sendCoachMessage(value);
+  });
+  $('#coach-input')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#coach-form').requestSubmit(); }
+  });
+  $('#coach-input')?.addEventListener('input', event => {
+    event.target.style.height = 'auto';
+    event.target.style.height = `${Math.min(160, event.target.scrollHeight)}px`;
+  });
+  renderCoachThreads();
+  renderCoachMessages();
+}
+
+function getReportsCollection() {
+  return currentUser ? collection(db, 'users', currentUser.uid, 'reports') : null;
+}
+
+async function saveAIReport(report) {
+  const normalized = { ...report, createdAt: report.createdAt || new Date().toISOString() };
+  reportCache = [normalized, ...reportCache.filter(item => item.id !== normalized.id)];
+  renderAIReportsList();
+  if (!currentUser) {
+    state.aiReports = [normalized, ...(state.aiReports || []).filter(item => item.id !== normalized.id)];
+    await saveState();
     return;
   }
-  
-  const html = state.aiReports.map(r => `
-    <div class="ai-report-item" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 16px; border-radius: var(--radius-sm); margin-bottom: 12px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <div style="font-weight: 600; font-size: 1.1rem; color: var(--text-primary);">${esc(r.title)}</div>
-        <div style="font-size: 0.75rem; color: var(--text-muted);">${fmtDate(r.date)}</div>
+  try {
+    await setDoc(doc(db, 'users', currentUser.uid, 'reports', normalized.id), normalized);
+  } catch (error) {
+    state.aiReports = [normalized, ...(state.aiReports || []).filter(item => item.id !== normalized.id)];
+    await saveState();
+    console.warn('Informe guardado localmente; migración pendiente.', error);
+  }
+}
+
+async function loadReports() {
+  if (!currentUser) { renderAIReportsList(); return; }
+  try {
+    const snapshot = await getDocs(query(getReportsCollection(), orderBy('createdAt', 'desc'), limit(50)));
+    reportCache = snapshot.docs.map(item => item.data());
+  } catch (error) {
+    console.warn('No se pudo cargar el historial de informes.', error);
+  }
+  renderAIReportsList();
+}
+
+async function migrateLegacyReports() {
+  if (!currentUser || state.reportsMigrated || !(state.aiReports || []).length) return;
+  try {
+    for (const legacy of state.aiReports) {
+      const normalized = { ...legacy, createdAt: legacy.createdAt || legacy.date || new Date().toISOString(), migratedFromState: true };
+      await setDoc(doc(db, 'users', currentUser.uid, 'reports', normalized.id), normalized);
+    }
+    state.reportsMigrated = true;
+    state.aiReports = [];
+    await saveState(true);
+    await loadReports();
+  } catch (error) {
+    console.warn('Los informes anteriores se conservaron porque la migración no terminó.', error);
+  }
+}
+
+function getVisibleReports() {
+  const all = [...reportCache, ...(state.aiReports || [])];
+  return [...new Map(all.map(report => [report.id, report])).values()]
+    .sort((a, b) => Date.parse(b.createdAt || b.date || 0) - Date.parse(a.createdAt || a.date || 0));
+}
+
+function renderAIReportsList() {
+  const container = $('#ai-reports-list');
+  if (!container) return;
+  const reports = getVisibleReports();
+  if (!reports.length) {
+    container.innerHTML = '<div class="empty-reports"><h3>Todavía no hay informes</h3><p>Genera un mapa personal o un diagnóstico para convertir tus datos en decisiones.</p></div>';
+    return;
+  }
+  container.innerHTML = reports.map(report => `
+    <article class="report-item" data-report-id="${esc(report.id)}">
+      <div class="report-summary">
+        <div class="report-summary-top"><h3>${esc(report.title || 'Informe ROKA')}</h3><span class="report-date">${fmtDate(report.createdAt || report.date)}</span></div>
+        <p class="report-preview">${esc(reportPreview(report.content || ''))}</p>
+        <div class="report-controls">
+          <button data-report-action="toggle">Abrir informe</button>
+          <button data-report-action="ask">Preguntar al Coach</button>
+          <button data-report-action="copy">Copiar</button>
+          <button data-report-action="print">Imprimir</button>
+          <button data-report-action="delete">Eliminar</button>
+        </div>
       </div>
-      <div class="markdown-body" style="font-size: 0.85rem; color: var(--text-secondary); max-height: 250px; overflow-y: auto; white-space: pre-wrap; background: rgba(0,0,0,0.1); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); margin-top: 8px; line-height: 1.5;">${esc(r.content)}</div>
-      <button class="zen-btn zen-btn-ghost btn-delete-report" data-id="${r.id}" style="margin-top: 12px; font-size: 0.75rem; padding: 4px 8px; color: var(--accent-orange); border-color: rgba(200,100,100,0.2);">Eliminar Reporte</button>
-    </div>
-  `).join('');
-  containers.forEach(container => {
-    container.innerHTML = html;
-    container.querySelectorAll('.btn-delete-report').forEach(b => {
-      b.addEventListener('click', () => {
-        state.aiReports = state.aiReports.filter(x => x.id !== b.dataset.id);
-        saveState();
-        renderAIReportsList();
-      });
-    });
-  });
+      <div class="report-body" hidden><div class="markdown-body">${renderSafeMarkdown(report.content || '')}</div></div>
+    </article>`).join('');
+
+  container.querySelectorAll('[data-report-action]').forEach(button => button.addEventListener('click', async () => {
+    const article = button.closest('[data-report-id]');
+    const report = reports.find(item => item.id === article?.dataset.reportId);
+    if (!report) return;
+    const action = button.dataset.reportAction;
+    if (action === 'toggle') {
+      const body = article.querySelector('.report-body');
+      body.hidden = !body.hidden;
+      button.textContent = body.hidden ? 'Abrir informe' : 'Cerrar informe';
+    } else if (action === 'ask') {
+      switchTab('coach');
+      showCoachView('chat');
+      const input = $('#coach-input');
+      input.value = `Quiero conversar sobre el informe “${report.title}”. Ayúdame a elegir la acción más importante.`;
+      input.focus();
+    } else if (action === 'copy') {
+      await navigator.clipboard.writeText(report.content || '');
+      showToast('Informe copiado');
+    } else if (action === 'print') {
+      article.querySelector('.report-body').hidden = false;
+      window.print();
+    } else if (action === 'delete' && confirm(`¿Eliminar “${report.title}”? Esta acción no se puede deshacer.`)) {
+      reportCache = reportCache.filter(item => item.id !== report.id);
+      state.aiReports = (state.aiReports || []).filter(item => item.id !== report.id);
+      if (currentUser) await deleteDoc(doc(db, 'users', currentUser.uid, 'reports', report.id)).catch(() => {});
+      await saveState(true);
+      renderAIReportsList();
+    }
+  }));
 }
 
 
@@ -2069,7 +2579,7 @@ function renderAIReportsList() {
 function renderAll() { 
   renderQuote(); renderPride(); renderGratitude(); 
   renderPlanner(); renderRituals(); renderDailyRitualsQuick(); renderWeeklyReflection(); 
-  renderSmartGoals(); renderLearning(); renderStopDoing(); renderGiants(); renderQuarterly10(); renderAnnual(); renderPersonalMap(); renderProfile(); renderBeliefsLibrary(); renderMantras(); updateXPDisplay(); checkBadges(); 
+  renderSmartGoals(); renderLearning(); renderStopDoing(); renderGiants(); renderQuarterly10(); renderAnnual(); renderPersonalMap(); renderProfile(); renderProgress(); renderBeliefsLibrary(); renderMantras(); updateXPDisplay(); checkBadges();
   renderJourneyStatus();
   updateClarityPanel();
   renderCalendar();
@@ -2079,35 +2589,37 @@ function renderAll() {
 
 // ─── ONBOARDING TOUR LOGIC ───
 let tourStep = 0;
+let tourWasRestarted = false;
+const onboardingDraft = { goal: '', action: '' };
 const TOUR_STEPS = [
   {
-    title: "Te damos la bienvenida",
-    desc: "ROKA MIND FOCUS es tu santuario digital de alto rendimiento y mentalidad zen. Permítenos mostrarte cómo elevar tu productividad al siguiente nivel en solo 4 pasos rápidos.",
-    element: null,
-    tab: "today"
+    title: "Convierte claridad en acción",
+    desc: "ROKA conecta tus metas, tu día y tu progreso para mostrarte siempre el siguiente paso.",
+    input: false
   },
   {
-    title: "⚡ Planificación y Enfoque Diario",
-    desc: "En la pestaña Diario puedes activar el 'Modo Concentración' con presets zen y sonido ambiental, además de definir tu 'Plan del Día', rituales rápidos y registrar pequeñas victorias.",
-    element: "tab-daily",
-    tab: "today"
+    title: "¿Qué quieres mover primero?",
+    desc: "Escribe una prioridad real. No tiene que estar perfecta; después podrás convertirla en una meta SMART completa.",
+    input: true,
+    label: "Mi prioridad",
+    placeholder: "Ejemplo: conseguir tres nuevos clientes este trimestre",
+    key: 'goal'
   },
   {
-    title: "Reconfigurador de Creencias",
-    desc: "Transforma tus pensamientos limitantes en afirmaciones poderosas. Al escribir una creencia limitante y reconfigurarla, las partículas se disolverán visualmente y se guardará como un Mantra interactivo.",
-    element: "reframer-box",
-    tab: "today"
-  },
-  {
-    title: "🧭 Planificación de Alto Rendimiento",
-    desc: "Usa el resto de pestañas para planificar a largo plazo: Rituales en 'Semanal', Metas SMART en 'Mensual', la Rueda de la Vida interactiva en 'Trimestral' y tu Visión a 5 Años en 'Anual'. ¡Que empiece tu enfoque!",
-    element: "tab-nav",
-    tab: "today"
+    title: "Elige la primera acción",
+    desc: "Define algo que puedas comenzar hoy. El Coach podrá ayudarte a ajustar el plan cuando lo necesites.",
+    input: true,
+    label: "Mi primera acción",
+    placeholder: "Ejemplo: escribir y enviar la primera propuesta",
+    key: 'action'
   }
 ];
 
-window.startOnboardingTour = function() {
+window.startOnboardingTour = function(restarted = false) {
+  tourWasRestarted = restarted;
   tourStep = 0;
+  onboardingDraft.goal = '';
+  onboardingDraft.action = '';
   showTourStep();
 };
 
@@ -2121,49 +2633,54 @@ function showTourStep() {
   $('#onboarding-desc').textContent = step.desc;
   const stepIndicator = $('#onboarding-step') || $('#onboarding-steps');
   if(stepIndicator) stepIndicator.textContent = `Paso ${tourStep + 1} de ${TOUR_STEPS.length}`;
-  
-  // Limpiar highlights previos
-  $$('.onboarding-highlight').forEach(el => el.classList.remove('onboarding-highlight'));
-  
-  if (step.tab) {
-    switchTab(step.tab);
+  const wrap = $('#onboarding-input-wrap');
+  const input = $('#onboarding-input');
+  wrap.hidden = !step.input;
+  if (step.input) {
+    $('#onboarding-input-label').textContent = step.label;
+    input.placeholder = step.placeholder;
+    input.value = onboardingDraft[step.key] || '';
+    setTimeout(() => input.focus(), 50);
   }
-  
-  if (step.element) {
-    const el = $(`#${step.element}`) || $(`.${step.element}`);
-    if (el) {
-      el.classList.add('onboarding-highlight');
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      overlay.classList.add('has-highlight');
-    } else {
-      overlay.classList.remove('has-highlight');
-    }
-  } else {
-    overlay.classList.remove('has-highlight');
-  }
-  
   const nextBtn = $('#onboarding-next');
-  if (tourStep === TOUR_STEPS.length - 1) {
-    nextBtn.textContent = "Comenzar ✦";
-  } else {
-    nextBtn.textContent = "Siguiente →";
-  }
+  nextBtn.textContent = tourStep === TOUR_STEPS.length - 1 ? 'Crear mi primer día' : 'Continuar';
 }
 
-function handleTourNext() {
+async function handleTourNext() {
+  const step = TOUR_STEPS[tourStep];
+  if (step.input) {
+    const value = $('#onboarding-input').value.trim();
+    if (!value) { showToast('Escribe una respuesta para continuar'); return; }
+    onboardingDraft[step.key] = value;
+  }
   if (tourStep < TOUR_STEPS.length - 1) {
     tourStep++;
     showTourStep();
   } else {
-    closeTour();
+    if (onboardingDraft.goal) state.smartGoals.push({ id: gid(), goal: onboardingDraft.goal, measurable: '', achievable: true, relevance: 'Prioridad inicial', duration: 30, progress: 0, nextStep: onboardingDraft.action, startDate: todayStr(), completed: false });
+    if (onboardingDraft.action) {
+      const today = todayStr();
+      if (!state.dailyTasks[today]) state.dailyTasks[today] = [];
+      state.dailyTasks[today].push({ id: gid(), text: onboardingDraft.action, priority: 'high', completed: false });
+    }
+    state.onboarding = { status: 'completed', completedAt: new Date().toISOString(), step: TOUR_STEPS.length };
+    state.hasSeenOnboarding = true;
+    await saveState(true);
+    renderAll();
+    closeTour(false);
+    switchTab('hoy');
   }
 }
 
-function closeTour() {
+function closeTour(skipped = true) {
   const overlay = $('#onboarding-overlay');
   if (overlay) overlay.style.display = 'none';
-  $$('.onboarding-highlight').forEach(el => el.classList.remove('onboarding-highlight'));
-  showToast('Disfruta de ROKA MIND FOCUS');
+  if (skipped && !tourWasRestarted) {
+    state.onboarding = { status: 'skipped', completedAt: new Date().toISOString(), step: tourStep };
+    state.hasSeenOnboarding = true;
+    saveState(true);
+  }
+  showToast(skipped ? 'Puedes volver a la introducción desde Perfil' : 'Tu primer día está listo');
 }
 
 // ─── INIT ───
@@ -2189,13 +2706,18 @@ function safeInit(fn, name) {
 function initThemeToggle() {
   const btn = $('#theme-toggle-btn');
   if(!btn) return;
-  if (localStorage.getItem('rokaDesignThemeVersion') !== 'bamboo-sand-v14') {
-    localStorage.setItem('rokaLightTheme', 'true');
-    localStorage.setItem('rokaDesignThemeVersion', 'bamboo-sand-v14');
-  }
-  const isLight = localStorage.getItem('rokaLightTheme') === 'true';
+  applyThemePreset(localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden');
+  const storedTheme = localStorage.getItem('rokaLightTheme');
+  const systemTheme = window.matchMedia?.('(prefers-color-scheme: light)');
+  const isLight = storedTheme === null ? Boolean(systemTheme?.matches) : storedTheme === 'true';
   if(isLight) { document.body.classList.add('light-theme'); btn.textContent = '◑'; }
   else { document.body.classList.remove('light-theme'); btn.textContent = '◐'; }
+
+  systemTheme?.addEventListener?.('change', event => {
+    if (localStorage.getItem('rokaLightTheme') !== null) return;
+    document.body.classList.toggle('light-theme', event.matches);
+    btn.textContent = event.matches ? '◑' : '◐';
+  });
   
   btn.addEventListener('click', () => {
     document.body.classList.toggle('light-theme');
@@ -2203,6 +2725,7 @@ function initThemeToggle() {
     localStorage.setItem('rokaLightTheme', nowLight);
     btn.textContent = nowLight ? '◑' : '◐';
     showToast(nowLight ? 'Modo claro activado' : 'Modo oscuro activado');
+    renderThemePresets();
   });
 }
 
@@ -2227,8 +2750,9 @@ function initApp() {
   safeInit(initCalendar, 'initCalendar');
   safeInit(initPersonalMap, 'initPersonalMap');
   safeInit(initProfile, 'initProfile');
+  safeInit(initCoach, 'initCoach');
   safeInit(renderAll, 'renderAll');
-  safeInit(() => switchTab('today'), 'switchTab');
+  safeInit(() => switchTab(routeFromHash(), { replace: !location.hash, updateHash: !location.hash }), 'switchTab');
 
   // Eventos de onboarding
   const nextBtn = $('#onboarding-next');
@@ -2238,6 +2762,7 @@ function initApp() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initSelectionGuard();
   initAuth();
   initCookieBanner();
   
@@ -2249,6 +2774,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }).catch(err => {
       console.log('SW registration failed: ', err);
     });
+    if ('caches' in window) {
+      caches.keys()
+        .then(keys => Promise.all(keys
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v33-touch-selection-guard'))
+          .map(key => caches.delete(key))))
+        .catch(() => {});
+    }
   }
 });
 
@@ -2257,3 +2789,5 @@ window.test_initApp = initApp;
 window.test_loadState = loadState;
 window.test_state = state;
 window.test_setCurrentUser = (u) => { currentUser = u; };
+window.test_renderReports = renderAIReportsList;
+window.test_navigate = switchTab;

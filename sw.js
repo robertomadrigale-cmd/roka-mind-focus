@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v26-touch-nav-fix';
+const CACHE_NAME = 'roka-mind-v33-touch-selection-guard';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;
@@ -10,6 +10,7 @@ const urlsToCache = [
   '/js/components/Timer.js',
   '/js/components/LifeWheel.js',
   '/js/services/aiGateway.js',
+  '/js/services/markdown.js',
   '/manifest.json',
   '/assets/icon.svg',
   '/assets/zen-garden-bg.webp'
