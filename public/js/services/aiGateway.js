@@ -13,7 +13,8 @@ export async function callAIGateway({
 }) {
   const payload = { mode, prompt, messages, context, systemInstruction, provider, model, clientApiKey };
   const gatewayPayload = { mode, prompt, messages, context, systemInstruction, provider, model };
-  if (clientApiKey && ['google', 'deepseek'].includes(provider)) {
+  // Con llave propia se llama directo al proveedor desde el navegador (OpenAI, Gemini y DeepSeek permiten CORS).
+  if (clientApiKey && ['openai', 'google', 'deepseek'].includes(provider)) {
     return callDirectProvider(payload);
   }
 
@@ -28,9 +29,6 @@ export async function callAIGateway({
     if (!String(data.text || '').trim()) throw new Error('El Coach devolvió una respuesta vacía. Intenta nuevamente.');
     return { text: String(data.text || ''), usage: data.usage || null, route: 'gateway /api/ai' };
   } catch (error) {
-    if (provider === 'openai') {
-      throw new Error('OpenAI necesita el backend /api/ai, pero no está desplegado o no responde. Activa Firebase Functions/Blaze o usa Google Gemini/DeepSeek con API key local.');
-    }
     if (!clientApiKey) {
       throw new Error('Falta API key o backend activo. Ve a Perfil > Conexión IA, pega tu llave y presiona Guardar llave.');
     }
@@ -53,6 +51,11 @@ async function callDirectProvider(payload) {
   return callDirectOpenAI(payload);
 }
 
+// Normaliza nombres escritos a mano: "GPT-5 Nano" -> "gpt-5-nano".
+function normalizeOpenAIModel(model) {
+  return String(model || 'gpt-4o').trim().toLowerCase().replace(/\s+/g, '-');
+}
+
 async function callDirectOpenAI(payload) {
   const input = buildConversationPrompt(payload);
   let response;
@@ -64,13 +67,13 @@ async function callDirectOpenAI(payload) {
         Authorization: `Bearer ${payload.clientApiKey}`
       },
       body: JSON.stringify({
-        model: payload.model || 'gpt-4o',
+        model: normalizeOpenAIModel(payload.model),
         instructions: payload.systemInstruction || 'Responde en español con claridad.',
         input
       })
     });
   } catch (error) {
-    throw new Error('OpenAI no permite llamadas directas desde esta web sin backend activo. Cambia el proveedor a Google Gemini o DeepSeek, o activa Firebase Functions/Blaze para usar OpenAI.');
+    throw new Error(`OpenAI rechazó la solicitud o no hay conexión. Revisa que la llave sea válida y tenga saldo, y que el modelo exista (escribiste: ${normalizeOpenAIModel(payload.model)}; ejemplos: gpt-5-nano, gpt-4o-mini).`);
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.error) throw new Error(data.error?.message || 'OpenAI no respondió correctamente.');

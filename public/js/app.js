@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, browserLocalPersistence, getRedirectResult, setPersistence, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+import { getFirestore, doc, setDoc, deleteDoc, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 import { Timer } from "./components/Timer.js";
 import { LifeWheel, LIFE_WHEEL_AXES } from "./components/LifeWheel.js";
 import { localDateKey } from "./lib/dates.js";
@@ -8,6 +8,7 @@ import { choosePersistedState, hasMeaningfulUserData, jsonSizeBytes, pruneStateF
 import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, migrateState as migrateSystemState, overdueTasks, ritualAdherence, shouldPromptWeeklyReview, weekKey, weekStats } from "./lib/system.js";
 import { callAIGateway } from "./services/aiGateway.js?v=10.8";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
+import { clearSyncBase, hasPendingChanges, pushChanges, startSync, stopSync } from "./services/syncService.js?v=41-sync-v5";
 
 // ==========================================
 // ROKA MIND FOCUS — Application Core v2.0
@@ -81,7 +82,7 @@ const AI_PROVIDER_KEY = 'rokaMindAIProvider';
 const AI_MODEL_KEY = 'rokaMindAIModel';
 const AI_SESSION_KEY = 'rokaMindAIKey';
 const CLOUD_SAVE_DEBOUNCE_MS = 1500;
-const CLOUD_STATE_WARN_BYTES = 800 * 1024;
+const LOCAL_STATE_WARN_BYTES = 4 * 1024 * 1024;
 const THEME_PRESET_KEY = 'rokaMindThemePreset';
 const THEME_PRESETS = [
   { code: 'zen-garden', name: 'Zen', description: 'Niebla, piedra y calma profunda', swatches: ['#07120e', '#163226', '#8fcfba', '#d8c08a'] },
@@ -178,37 +179,41 @@ function withTimeout(promise) {
   ]);
 }
 
-function getCloudSafeState() {
-  const { state: prunedState, archive } = pruneStateForCloud(state);
-  if (Object.keys(archive.dailyTasks).length || Object.keys(archive.activityLog).length) {
-    state.localArchive = prunedState.localArchive;
-    state.dailyTasks = prunedState.dailyTasks || {};
-    state.activityLog = prunedState.activityLog || {};
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
-  const cloudState = JSON.parse(JSON.stringify(prunedState));
-  cloudState.pendingCloudSync = false;
-  delete cloudState.lastCloudSyncError;
-  delete cloudState.ownerUid;
-  delete cloudState.localArchive;
-  if (cloudState.aiConfig) {
-    delete cloudState.aiConfig.apiKey;
-    delete cloudState.aiConfig.provider;
-    delete cloudState.aiConfig.model;
-  }
-  return cloudState;
-}
-
 function getLocalCandidateForCurrentUser() {
   const localData = parseStoredState(localStorage.getItem(STORAGE_KEY));
   return currentUser ? selectLocalCandidateForUser(localData, currentUser.uid) : localData;
+}
+
+function persistLocalState() {
+  if (jsonSizeBytes(state) > LOCAL_STATE_WARN_BYTES) {
+    const { state: prunedState, archive } = pruneStateForCloud(state);
+    if (Object.keys(archive.dailyTasks).length || Object.keys(archive.activityLog).length) {
+      state.localArchive = prunedState.localArchive;
+      state.dailyTasks = prunedState.dailyTasks || {};
+      state.activityLog = prunedState.activityLog || {};
+    }
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function getExportState() {
+  const payload = JSON.parse(JSON.stringify(state));
+  payload.pendingCloudSync = false;
+  delete payload.lastCloudSyncError;
+  delete payload.ownerUid;
+  if (payload.aiConfig) {
+    delete payload.aiConfig.apiKey;
+    delete payload.aiConfig.provider;
+    delete payload.aiConfig.model;
+  }
+  return payload;
 }
 
 function loadLocalState() {
   const localData = getLocalCandidateForCurrentUser();
   state = deepMerge(DEFAULT_STATE, localData);
   normalizeState();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  persistLocalState();
 }
 
 function applyFirstRunDefaultsIfNeeded() {
@@ -217,38 +222,73 @@ function applyFirstRunDefaultsIfNeeded() {
   return true;
 }
 
-async function reconcileCloudStateInBackground() {
+let remoteRenderTimer = null;
+let remoteDirtyView = null;
+
+function activeTabElement() {
+  return document.querySelector('.tab-content.active');
+}
+
+function focusedInputInsideActiveView() {
+  const active = document.activeElement;
+  return Boolean(
+    active &&
+    active.matches?.('input, textarea, select, [contenteditable="true"]') &&
+    activeTabElement()?.contains(active)
+  );
+}
+
+function applyRemoteStateNow(newState) {
+  state = deepMerge(DEFAULT_STATE, newState || {});
+  normalizeState();
+  state.pendingCloudSync = hasPendingChanges();
+  persistLocalState();
+
+  if (focusedInputInsideActiveView()) {
+    remoteDirtyView = activeTabElement();
+    remoteDirtyView?.setAttribute('data-sync-dirty', 'true');
+    document.activeElement.addEventListener('blur', () => {
+      if (!remoteDirtyView) return;
+      remoteDirtyView.removeAttribute('data-sync-dirty');
+      remoteDirtyView = null;
+      renderAll();
+      updateAccountSyncStatus(state.pendingCloudSync ? 'pending' : 'synced');
+    }, { once: true });
+    return;
+  }
+
+  renderAll();
+  updateAccountSyncStatus(state.pendingCloudSync ? 'pending' : 'synced');
+}
+
+function onRemoteChange(newState) {
+  updateAccountSyncStatus('applying');
+  clearTimeout(remoteRenderTimer);
+  remoteRenderTimer = setTimeout(() => applyRemoteStateNow(newState), 300);
+}
+
+async function startCloudSync() {
   if (!currentUser) return;
-  updateAccountSyncStatus('saving');
-  const beforeUpdatedAt = state.updatedAt;
-  const localData = getLocalCandidateForCurrentUser();
-  let shouldSyncLocalToCloud = false;
   try {
-    const docRef = doc(db, "users", currentUser.uid);
-    const docSnap = await withTimeout(getDoc(docRef));
-    if (docSnap.exists()) {
-      const remoteData = docSnap.data();
-      const chosen = choosePersistedState(localData, remoteData, { uid: currentUser.uid, todayKey: todayStr() });
-      shouldSyncLocalToCloud = chosen === localData && hasMeaningfulUserData(localData, todayStr());
-      state = deepMerge(DEFAULT_STATE, chosen);
-    } else {
-      state = deepMerge(DEFAULT_STATE, localData);
-      shouldSyncLocalToCloud = hasMeaningfulUserData(localData, todayStr());
-    }
-    normalizeState();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    if (shouldSyncLocalToCloud) {
-      await saveState(true);
-      await flushCloudSave();
-    }
-    else {
-      state.pendingCloudSync = false;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      updateAccountSyncStatus('synced');
-    }
-    if (beforeUpdatedAt !== state.updatedAt) renderAll();
-  } catch(e) {
-    console.warn('No se pudo sincronizar Firebase al inicio; la app queda usable con datos locales.', e);
+    await startSync(currentUser.uid, {
+      db,
+      storage: localStorage,
+      baseState: DEFAULT_STATE,
+      getState: () => state,
+      getLocalState: getLocalCandidateForCurrentUser,
+      choosePersistedState: (localData, remoteData) => choosePersistedState(localData, remoteData, { uid: currentUser.uid, todayKey: todayStr() }),
+      onStatus: updateAccountSyncStatus,
+      onInitialState: nextState => {
+        state = deepMerge(DEFAULT_STATE, nextState || {});
+        normalizeState();
+        state.pendingCloudSync = hasPendingChanges();
+        persistLocalState();
+        renderAll();
+      },
+      onRemoteChange
+    });
+  } catch (error) {
+    console.warn('No se pudo sincronizar Firebase al inicio; la app queda usable con datos locales.', error);
     updateAccountSyncStatus(state.pendingCloudSync ? 'pending' : 'synced');
   }
 }
@@ -258,12 +298,12 @@ async function saveState(quiet = false) {
   state.updatedAt = new Date().toISOString();
   state.pendingCloudSync = !!currentUser;
   if (currentUser) state.ownerUid = currentUser.uid;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  persistLocalState();
   if (currentUser) updateAccountSyncStatus('saving');
 
   if (!currentUser) {
     state.pendingCloudSync = false;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    persistLocalState();
     if (!quiet) showSaveStatus('saved', 'Guardado en este dispositivo');
     return;
   }
@@ -294,51 +334,40 @@ async function flushCloudSave(quiet = true) {
 
 async function writeCloudState(quiet = false) {
   if (!currentUser) return;
-  const cloudState = getCloudSafeState();
-  const cloudSize = jsonSizeBytes(cloudState);
-  if (cloudSize > CLOUD_STATE_WARN_BYTES) {
-    state.pendingCloudSync = true;
-    state.lastCloudSyncError = 'El documento local supera el tamaño recomendado para sincronizar.';
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    console.warn(`Estado no sincronizado: ${cloudSize} bytes supera el umbral de ${CLOUD_STATE_WARN_BYTES}.`);
-    updateAccountSyncStatus('pending');
-    if (!quiet) showSaveStatus('warning', 'Guardado local. Reduce historial antes de sincronizar.');
-    return;
-  }
   try {
-    await withTimeout(setDoc(doc(db, "users", currentUser.uid), cloudState));
+    await pushChanges(quiet);
     state.pendingCloudSync = false;
     delete state.lastCloudSyncError;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    persistLocalState();
     if (!quiet) showSaveStatus('saved', 'Guardado y sincronizado');
     updateAccountSyncStatus('synced');
   } catch(e) {
     state.pendingCloudSync = true;
     state.lastCloudSyncError = e.message || String(e);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    persistLocalState();
     console.error("Guardado local correcto; Firebase quedó pendiente.", e);
     if (!quiet) showSaveStatus('warning', 'Guardado en este dispositivo. Nube pendiente.');
-    updateAccountSyncStatus('pending');
+    updateAccountSyncStatus(navigator.onLine === false ? 'offline' : 'pending');
   }
 }
 
 async function syncPendingState() {
   if (!currentUser) return;
   const localData = parseStoredState(localStorage.getItem(STORAGE_KEY));
-  if (!localData.pendingCloudSync) {
+  if (!localData.pendingCloudSync && !hasPendingChanges()) {
     updateAccountSyncStatus('synced');
     return;
   }
   try {
-    await withTimeout(setDoc(doc(db, "users", currentUser.uid), getCloudSafeState()));
+    await pushChanges(true);
     state.pendingCloudSync = false;
     delete state.lastCloudSyncError;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    persistLocalState();
     showSaveStatus('saved', 'Sincronizado con la nube');
     updateAccountSyncStatus('synced');
   } catch(e) {
     console.warn('Sincronización pendiente; se intentará de nuevo.', e);
-    updateAccountSyncStatus('pending');
+    updateAccountSyncStatus(navigator.onLine === false ? 'offline' : 'pending');
   }
 }
 
@@ -397,14 +426,16 @@ const SYNC_DOT_LABELS = {
   synced: 'Nube sincronizada',
   pending: 'Nube pendiente',
   saving: 'Sincronizando...',
+  applying: 'Aplicando cambios de otro dispositivo',
   idle: 'Cuenta conectada',
-  offline: 'Sin sesión'
+  offline: 'Sin conexión',
+  signedout: 'Sin sesión'
 };
 
 function updateAccountSyncStatus(status = 'idle') {
   const el = document.querySelector('#account-sync-status');
   const dot = document.querySelector('#avatar-sync-dot');
-  const effectiveStatus = currentUser ? status : 'offline';
+  const effectiveStatus = currentUser ? (navigator.onLine === false ? 'offline' : status) : 'signedout';
   const label = SYNC_DOT_LABELS[effectiveStatus] || SYNC_DOT_LABELS.idle;
   if (el) {
     el.dataset.status = effectiveStatus;
@@ -454,6 +485,8 @@ function clearAccidentalSelection(event) {
 function clearLocalSession({ render = true } = {}) {
   clearTimeout(cloudSaveTimer);
   cloudSaveTimer = null;
+  stopSync();
+  clearSyncBase();
   localStorage.removeItem(STORAGE_KEY);
   clearStoredAIKey();
   state = JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -498,7 +531,6 @@ function initAuth() {
       updateAccountSyncStatus('saving');
 
       loadLocalState();
-      applyFirstRunDefaultsIfNeeded();
 
       if(!appInitialized) {
         initApp();
@@ -507,7 +539,8 @@ function initAuth() {
         renderAll();
       }
       updateAccountSyncStatus(state.pendingCloudSync ? 'pending' : 'synced');
-      reconcileCloudStateInBackground().then(async () => {
+      startCloudSync().then(async () => {
+        applyFirstRunDefaultsIfNeeded();
         await syncPendingState();
         await Promise.all([loadCoachThreads(), loadReports(), migrateLegacyReports()]);
       });
@@ -517,7 +550,7 @@ function initAuth() {
       lastAuthUid = '';
       $('#auth-overlay').style.display = 'flex';
       $('#app').style.display = 'none';
-      updateAccountSyncStatus('offline');
+      updateAccountSyncStatus('signedout');
     }
   });
 
@@ -554,6 +587,7 @@ function initAuth() {
   });
 
   window.addEventListener('online', () => syncPendingState());
+  window.addEventListener('offline', () => updateAccountSyncStatus('offline'));
   setInterval(() => syncPendingState(), 45000);
 
   const logoutBtn = $('#logout-btn');
@@ -1900,7 +1934,7 @@ function initProfile() {
   $('#restart-onboarding-btn')?.addEventListener('click', () => startOnboardingTour(true));
   $('#open-advanced-settings-btn')?.addEventListener('click', () => openAiSettingsModal());
   $('#export-data-btn')?.addEventListener('click', () => {
-    const payload = JSON.stringify(getCloudSafeState(), null, 2);
+    const payload = JSON.stringify(getExportState(), null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url;
@@ -3066,7 +3100,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v40-button-fix'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v41-sync-v5'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

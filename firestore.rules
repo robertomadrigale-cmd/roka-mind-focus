@@ -17,6 +17,24 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
+      match /sync/{docId} {
+        allow get, list, create, update, delete: if request.auth != null
+          && request.auth.uid == userId
+          && docId in ['collections', 'singletons', 'counters'];
+      }
+
+      match /days/{dayId} {
+        allow get, list: if request.auth != null && request.auth.uid == userId;
+        allow create, update, delete: if request.auth != null
+          && request.auth.uid == userId
+          && dayId.matches('^\\d{4}-\\d{2}-\\d{2}$');
+      }
+
+      match /backups/{backupId} {
+        allow get, list, create: if request.auth != null && request.auth.uid == userId;
+        allow update, delete: if false;
+      }
+
       match /aiUsage/{usageId} {
         allow read, write: if false;
       }

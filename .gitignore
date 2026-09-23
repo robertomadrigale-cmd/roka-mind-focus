@@ -16,3 +16,7 @@ refactor_*.py
 !public/assets/*.webp
 
 deployed-firestore.rules
+
+.firebase-config/
+.npm-cache/
+firestore-debug.log
