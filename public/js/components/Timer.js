@@ -121,7 +121,7 @@ export class Timer {
     this.state.endAt = Date.now() + this.state.remainingMs;
     const startBtn = this.$('#timer-start-btn');
     if (startBtn) {
-      startBtn.textContent = '⏸ Pausar';
+      startBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-pause"/></svg> Pausar';
       startBtn.className = 'zen-btn zen-btn-gold';
     }
 
@@ -154,7 +154,7 @@ export class Timer {
 
     const startBtn = this.$('#timer-start-btn');
     if (startBtn) {
-      startBtn.textContent = '▶ Continuar';
+      startBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Continuar';
       startBtn.className = 'zen-btn zen-btn-primary';
     }
     document.body.classList.remove('meditation-fullscreen-active');
@@ -180,7 +180,7 @@ export class Timer {
     this.state.remainingMs = this.state.totalSeconds * 1000;
     this.state.endAt = 0;
     const startBtn = this.$('#timer-start-btn');
-    if (startBtn) startBtn.textContent = '▶ Iniciar';
+    if (startBtn) startBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Iniciar';
     this.updateDisplay();
   }
 
@@ -258,10 +258,10 @@ export class Timer {
     const btn = this.$('#deep-focus-btn');
     if (!btn) return;
     if (document.body.classList.contains('deep-focus-active') || document.body.classList.contains('meditation-fullscreen-active')) {
-      btn.textContent = '✕ Salir';
+      btn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-x"/></svg> Salir';
       btn.className = 'zen-btn zen-btn-primary';
     } else {
-      btn.textContent = '◉ Foco Total';
+      btn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-circle-dot"/></svg> Foco Total';
       btn.className = 'zen-btn zen-btn-ghost';
     }
   }

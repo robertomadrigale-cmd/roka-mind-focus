@@ -84,16 +84,13 @@ const CLOUD_SAVE_DEBOUNCE_MS = 1500;
 const CLOUD_STATE_WARN_BYTES = 800 * 1024;
 const THEME_PRESET_KEY = 'rokaMindThemePreset';
 const THEME_PRESETS = [
-  { code: 'zen-garden', name: 'Zen Garden', description: 'Niebla, piedra y calma profunda', swatches: ['#07120e', '#163226', '#8fcfba', '#d8c08a'] },
-  { code: 'executive-blue', name: 'Azul ejecutivo', description: 'Actual y seguro', swatches: ['#07111E', '#122238', '#68B7FF'] },
-  { code: 'graphite', name: 'Graphite', description: 'Premium oscuro', swatches: ['#080A0D', '#171C24', '#78B7FF'] },
-  { code: 'emerald', name: 'Emerald', description: 'Comercial fresco', swatches: ['#06140F', '#112B22', '#58D99A'] },
-  { code: 'wine', name: 'Wine', description: 'Ejecutivo calido', swatches: ['#170A12', '#321826', '#F08CAA'] },
-  { code: 'opera-gx', name: 'Opera GX', description: 'Neon gamer magenta', swatches: ['#0D0A14', '#1A1322', '#FF1B57'] },
-  { code: 'moleskine', name: 'Moleskine', description: 'Negro, papel y elastico', swatches: ['#0B0B0A', '#1C1914', '#B63A31', '#D6C08C'] },
-  { code: 'paper', name: 'Paper', description: 'Claro y descansado', swatches: ['#EFE8DA', '#FFF9EF', '#8E6A3C'] }
+  { code: 'zen-garden', name: 'Zen', description: 'Niebla, piedra y calma profunda', swatches: ['#07120e', '#163226', '#8fcfba', '#d8c08a'] },
+  { code: 'paper', name: 'Papel', description: 'Claro y descansado', swatches: ['#EFE8DA', '#FFF9EF', '#8E6A3C'] },
+  { code: 'graphite', name: 'Grafito', description: 'Oscuro de alto contraste', swatches: ['#080A0D', '#171C24', '#78B7FF'] }
 ];
 const THEME_CLASS_NAMES = THEME_PRESETS.map(preset => `theme-${preset.code}`);
+const THEME_AUTO_LIGHT = 'paper';
+const THEME_AUTO_DARK = 'zen-garden';
 
 const STORAGE_KEY = 'rokaMindState';
 let state = JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -396,23 +393,28 @@ function recordGoalProgress(goal, progress) {
   goal.status = value >= 100 ? 'done' : (goal.status === 'done' ? 'active' : goal.status || 'active');
 }
 
+const SYNC_DOT_LABELS = {
+  synced: 'Nube sincronizada',
+  pending: 'Nube pendiente',
+  saving: 'Sincronizando...',
+  idle: 'Cuenta conectada',
+  offline: 'Sin sesión'
+};
+
 function updateAccountSyncStatus(status = 'idle') {
   const el = document.querySelector('#account-sync-status');
-  if (!el) return;
-  if (!currentUser) {
-    el.textContent = 'Sin sesión';
-    el.dataset.status = 'offline';
-    return;
+  const dot = document.querySelector('#avatar-sync-dot');
+  const effectiveStatus = currentUser ? status : 'offline';
+  const label = SYNC_DOT_LABELS[effectiveStatus] || SYNC_DOT_LABELS.idle;
+  if (el) {
+    el.dataset.status = effectiveStatus;
+    el.textContent = currentUser ? `${currentUser.email || 'Cuenta Google'} · ${label}` : label;
   }
-  const email = currentUser.email || 'Cuenta Google';
-  const labels = {
-    synced: 'Nube sincronizada',
-    pending: 'Nube pendiente',
-    saving: 'Sincronizando...',
-    idle: 'Cuenta conectada'
-  };
-  el.textContent = `${email} · ${labels[status] || labels.idle}`;
-  el.dataset.status = status;
+  if (dot) {
+    dot.dataset.status = effectiveStatus;
+    dot.title = label;
+    dot.setAttribute('aria-label', `Estado de sincronización: ${label}`);
+  }
 }
 
 function updateMobileViewportVars() {
@@ -491,32 +493,9 @@ function initAuth() {
       lastAuthUid = user.uid;
       $('#auth-overlay').style.display = 'none';
       $('#app').style.display = 'grid';
-      const avatar = $('#profile-avatar-btn');
-      if (avatar) avatar.textContent = (user.displayName || user.email || 'R').trim().charAt(0).toUpperCase();
+      const avatarLetter = $('.profile-avatar-letter');
+      if (avatarLetter) avatarLetter.textContent = (user.displayName || user.email || 'R').trim().charAt(0).toUpperCase();
       updateAccountSyncStatus('saving');
-      
-      if(!document.querySelector('#account-sync-status')) {
-        const sync = document.createElement('div');
-        sync.id = 'account-sync-status';
-        sync.className = 'account-sync-status';
-        sync.textContent = 'Cuenta conectada';
-        $('.header-right').prepend(sync);
-      }
-
-      if(!document.querySelector('#logout-btn')) {
-        const btn = document.createElement('button');
-        btn.id = 'logout-btn';
-        btn.className = 'zen-btn zen-btn-ghost';
-        btn.style.padding = '6px 12px';
-        btn.textContent = 'Cerrar Sesión';
-        btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          await withTimeout(flushCloudSave(true)).catch(error => console.warn('No se pudo completar el guardado antes de cerrar sesión.', error));
-          clearLocalSession({ render: false });
-          await signOut(auth);
-        });
-        $('.header-right').appendChild(btn);
-      }
 
       loadLocalState();
       applyFirstRunDefaultsIfNeeded();
@@ -538,8 +517,7 @@ function initAuth() {
       lastAuthUid = '';
       $('#auth-overlay').style.display = 'flex';
       $('#app').style.display = 'none';
-      if(document.querySelector('#logout-btn')) document.querySelector('#logout-btn').remove();
-      if(document.querySelector('#account-sync-status')) document.querySelector('#account-sync-status').remove();
+      updateAccountSyncStatus('offline');
     }
   });
 
@@ -577,6 +555,17 @@ function initAuth() {
 
   window.addEventListener('online', () => syncPendingState());
   setInterval(() => syncPendingState(), 45000);
+
+  const logoutBtn = $('#logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      logoutBtn.disabled = true;
+      await withTimeout(flushCloudSave(true)).catch(error => console.warn('No se pudo completar el guardado antes de cerrar sesión.', error));
+      clearLocalSession({ render: false });
+      await signOut(auth);
+      logoutBtn.disabled = false;
+    });
+  }
 }
 
 // ─── MOTIVATIONAL QUOTES ───
@@ -810,7 +799,8 @@ function switchTab(t, options = {}) {
 function updateHeaderDate() {
   const now=new Date(), opts={weekday:'long',year:'numeric',month:'long',day:'numeric'};
   const s=now.toLocaleDateString('es-MX',opts);
-  $('#header-date').textContent=s.charAt(0).toUpperCase()+s.slice(1);
+  const el = $('#hoy-today-date');
+  if (el) el.textContent=s.charAt(0).toUpperCase()+s.slice(1);
 }
 
 // ─── STREAK CALCULATOR ───
@@ -917,8 +907,8 @@ function saveReframe() {
 // ─── MANTRAS ───
 function renderMantras() {
   const c=$('#mantras-grid'); if(!c)return;
-  if(!state.mantras.length){c.innerHTML='<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon">静</div><div class="empty-state-text">Reconfigura una creencia para crear tu primer mantra.</div></div>';return;}
-  c.innerHTML=state.mantras.map(m=>`<div class="mantra-card" data-id="${m.id}"><div class="mantra-text">"${esc(m.text)}"</div><div class="mantra-date">${fmtDate(m.date)}</div><button class="btn-delete mantra-delete" data-id="${m.id}">✕</button></div>`).join('');
+  if(!state.mantras.length){c.innerHTML='<div class="empty-state empty-state-span"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-feather"/></svg></div><div class="empty-state-text">Reconfigura una creencia para crear tu primer mantra.</div><button class="zen-btn zen-btn-primary" id="empty-mantras-btn">Reconfigurar una creencia</button></div>';c.querySelector('#empty-mantras-btn')?.addEventListener('click',()=>$('#belief-input')?.focus());return;}
+  c.innerHTML=state.mantras.map(m=>`<div class="mantra-card" data-id="${m.id}"><div class="mantra-text">"${esc(m.text)}"</div><div class="mantra-date">${fmtDate(m.date)}</div><button class="btn-delete mantra-delete" data-id="${m.id}" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>`).join('');
   c.querySelectorAll('.mantra-delete').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();state.mantras=state.mantras.filter(m=>m.id!==b.dataset.id);saveState();renderMantras();}));
 }
 
@@ -929,7 +919,7 @@ function renderBeliefsLibrary() {
   const beliefs = state.beliefs || [];
   if (count) count.textContent = `${beliefs.length} ${beliefs.length === 1 ? 'registro' : 'registros'}`;
   if (!beliefs.length) {
-    c.innerHTML = '<div class="empty-state"><div class="empty-state-icon">静</div><div class="empty-state-text">Aún no has guardado creencias. Escribe una arriba para crear tu primer registro.</div></div>';
+    c.innerHTML = '<div class="empty-state"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-feather"/></svg></div><div class="empty-state-text">Aún no has guardado creencias. Escribe una arriba para crear tu primer registro.</div><button class="zen-btn zen-btn-primary" id="empty-beliefs-btn">Escribir mi primera creencia</button></div>';c.querySelector('#empty-beliefs-btn')?.addEventListener('click',()=>$('#belief-input')?.focus());
     return;
   }
   c.innerHTML = beliefs.slice().reverse().map(item => {
@@ -1269,13 +1259,13 @@ function addTask() {
 }
 function renderPlanner() {
   const today=todayStr(), tasks=state.dailyTasks[today]||[], c=$('#planner-tasks');
-  if(!tasks.length){c.innerHTML='<div class="empty-state" style="padding:20px;"><div class="empty-state-text" style="font-size:0.8rem;">Agrega tareas para planificar tu día</div></div>';updatePlannerProgress([]);return;}
+  if(!tasks.length){c.innerHTML='<div class="empty-state empty-state-compact"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg></div><div class="empty-state-text">Agrega tareas para planificar tu día</div><button class="zen-btn zen-btn-primary" id="empty-tasks-btn">Agregar mi primera tarea</button></div>';c.querySelector('#empty-tasks-btn')?.addEventListener('click',()=>$('#task-input')?.focus());updatePlannerProgress([]);return;}
   const prOrder={high:0,medium:1,low:2};
   const sorted=[...tasks].sort((a,b)=>(a.completed?1:0)-(b.completed?1:0)||(prOrder[a.priority]||1)-(prOrder[b.priority]||1));
   c.innerHTML=sorted.map(t=>{
     const prLabels={high:'Alta',medium:'Media',low:'Baja'};
     const goalLabel = t.goalId ? getGoalTitle(t.goalId) : '';
-    return `<div class="planner-task ${t.completed?'completed':''}"><button class="task-check ${t.completed?'done':''}" data-tid="${esc(t.id)}"></button><span class="task-text">${esc(t.text)}</span>${goalLabel?`<span class="task-goal-tag">${esc(goalLabel.slice(0,32))}</span>`:''}<span class="task-priority-tag ${t.priority}">${prLabels[t.priority]}</span><button class="btn-delete" data-del-task="${esc(t.id)}" style="opacity:0.5;">✕</button>${t.needsGoalFollowUp?`<div class="goal-followup-form"><input class="zen-input" data-follow-step="${esc(t.id)}" placeholder="Siguiente paso"><input class="zen-input" type="number" min="0" max="100" data-follow-progress="${esc(t.id)}" placeholder="Avance %"><button class="zen-btn zen-btn-primary" data-save-followup="${esc(t.id)}">Guardar</button></div>`:''}</div>`;
+    return `<div class="planner-task ${t.completed?'completed':''}"><button class="task-check ${t.completed?'done':''}" data-tid="${esc(t.id)}"></button><span class="task-text">${esc(t.text)}</span>${goalLabel?`<span class="task-goal-tag">${esc(goalLabel.slice(0,32))}</span>`:''}<span class="task-priority-tag ${t.priority}">${prLabels[t.priority]}</span><button class="btn-delete" data-del-task="${esc(t.id)}" style="opacity:0.5;" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>${t.needsGoalFollowUp?`<div class="goal-followup-form"><input class="zen-input" data-follow-step="${esc(t.id)}" placeholder="Siguiente paso"><input class="zen-input" type="number" min="0" max="100" data-follow-progress="${esc(t.id)}" placeholder="Avance %"><button class="zen-btn zen-btn-primary" data-save-followup="${esc(t.id)}">Guardar</button></div>`:''}</div>`;
   }).join('');
   c.querySelectorAll('.task-check').forEach(b=>b.addEventListener('click',()=>{const tk=tasks.find(t=>t.id===b.dataset.tid);if(tk){if(!tk.completed){state=completeTaskEffects(state,today,tk.id);}else{tk.completed=false;delete tk.completedAt;delete tk.needsGoalFollowUp;}saveState();renderPlanner();renderTodaySystem();renderSmartGoals();}}));
   c.querySelectorAll('[data-del-task]').forEach(b=>b.addEventListener('click',()=>{state.dailyTasks[today]=tasks.filter(t=>t.id!==b.dataset.delTask);saveState();renderPlanner();}));
@@ -1331,10 +1321,10 @@ function renderGoalNextStepsCard() {
   if (!c) return;
   const steps = goalNextSteps(state, todayStr());
   if (!steps.length) {
-    c.innerHTML = '<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange">M</div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><p class="card-subtitle">Crea una meta activa para convertirla en tareas de hoy.</p></div>';
+    c.innerHTML = '<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><p class="card-subtitle">Crea una meta activa para convertirla en tareas de hoy.</p></div>';
     return;
   }
-  c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange">M</div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><div class="goal-next-list">${steps.map(item => item.nextStep ? `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>${esc(item.nextStep)}</p></div>${item.plannedToday ? '<span class="cal-status-pill">En tu plan de hoy</span>' : `<button class="zen-btn zen-btn-primary" data-goal-today="${esc(item.id)}">Hacer hoy</button>`}</div>` : `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>Define el siguiente paso para desbloquear Hoy.</p><input class="zen-input" data-next-inline="${esc(item.id)}" placeholder="Siguiente paso de esta meta"></div><button class="zen-btn zen-btn-ghost" data-save-next-inline="${esc(item.id)}">Guardar</button></div>`).join('')}</div></div>`;
+  c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><div class="goal-next-list">${steps.map(item => item.nextStep ? `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>${esc(item.nextStep)}</p></div>${item.plannedToday ? '<span class="cal-status-pill">En tu plan de hoy</span>' : `<button class="zen-btn zen-btn-primary" data-goal-today="${esc(item.id)}">Hacer hoy</button>`}</div>` : `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>Define el siguiente paso para desbloquear Hoy.</p><input class="zen-input" data-next-inline="${esc(item.id)}" placeholder="Siguiente paso de esta meta"></div><button class="zen-btn zen-btn-ghost" data-save-next-inline="${esc(item.id)}">Guardar</button></div>`).join('')}</div></div>`;
   c.querySelectorAll('[data-goal-today]').forEach(button => button.addEventListener('click', () => addGoalStepTask(button.dataset.goalToday)));
   c.querySelectorAll('[data-save-next-inline]').forEach(button => button.addEventListener('click', () => {
     const goal = state.smartGoals.find(item => item.id === button.dataset.saveNextInline);
@@ -1351,7 +1341,7 @@ function renderLowLifeAreasCard() {
   if (!c) return;
   const areas = lowLifeAreas(state, 4);
   if (!areas.length) { c.innerHTML = ''; return; }
-  c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon green">○</div><h2 class="card-title">Áreas bajas de la Rueda</h2></div></div><div class="low-area-list">${areas.slice(0, 4).map(area => `<div class="low-area-item"><div><strong>${esc(getLifeAreaLabel(area.key))}</strong><span>${area.value}/10</span></div><button class="zen-btn zen-btn-primary" data-life-goal="${esc(area.key)}">Crear meta</button><button class="zen-btn zen-btn-ghost" data-life-ritual="${esc(area.key)}">Crear ritual</button></div>`).join('')}</div></div>`;
+  c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon green"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><h2 class="card-title">Áreas bajas de la Rueda</h2></div></div><div class="low-area-list">${areas.slice(0, 4).map(area => `<div class="low-area-item"><div><strong>${esc(getLifeAreaLabel(area.key))}</strong><span>${area.value}/10</span></div><button class="zen-btn zen-btn-primary" data-life-goal="${esc(area.key)}">Crear meta</button><button class="zen-btn zen-btn-ghost" data-life-ritual="${esc(area.key)}">Crear ritual</button></div>`).join('')}</div></div>`;
   c.querySelectorAll('[data-life-goal]').forEach(button => button.addEventListener('click', () => openSmartForm({ lifeArea: button.dataset.lifeGoal })));
   c.querySelectorAll('[data-life-ritual]').forEach(button => button.addEventListener('click', () => {
     switchTab('metas', { focus: true });
@@ -1381,7 +1371,7 @@ function updatePlannerProgress(tasks) {
 function renderDailyRitualsQuick() {
   const c=$('#daily-rituals-quick'); if(!c)return;
   renderRitualSelectors();
-  if(!state.rituals.length){c.innerHTML='<div class="empty-state" style="padding:20px;"><div class="empty-state-text" style="font-size:0.8rem;">Escribe arriba tu primer ritual diario. Para elegir días específicos usa "Editar días".</div></div>';return;}
+  if(!state.rituals.length){c.innerHTML='<div class="empty-state empty-state-compact"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-repeat"/></svg></div><div class="empty-state-text">Escribe arriba tu primer ritual diario. Para elegir días específicos usa "Editar días".</div><button class="zen-btn zen-btn-primary" id="empty-daily-ritual-btn">Agregar mi primer ritual</button></div>';c.querySelector('#empty-daily-ritual-btn')?.addEventListener('click',()=>$('#daily-ritual-input')?.focus());return;}
   const date = todayStr();
   const scheduled = state.rituals.filter(r => isRitualScheduled(r, date));
   const list = scheduled.length ? scheduled : state.rituals;
@@ -1408,10 +1398,10 @@ function initRituals() {
 function addRitual(inputSelector='#ritual-input', everyDay=false) { const i=$(inputSelector),n=i?.value.trim(); if(!n)return; if(state.rituals.length>=10){showToast('Máximo 10 rituales');return;} const goalId=(everyDay?$('#daily-ritual-goal'):$('#ritual-goal'))?.value||''; const lifeArea=$('#ritual-life-area')?.value||''; state.rituals.push({id:gid(),name:n,goalId,lifeArea,createdAt:new Date().toISOString(),days:{lun:everyDay,mar:everyDay,mie:everyDay,jue:everyDay,vie:everyDay,sab:everyDay,dom:everyDay},completions:{}}); saveState();i.value='';renderRituals();renderDailyRitualsQuick();renderSmartGoals();showToast(everyDay?'Ritual diario agregado':'Ritual agregado'); }
 function renderRituals() {
   const c=$('#rituals-container'); if(!c)return;
-  if(!state.rituals.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon">巡</div><div class="empty-state-text">Agrega tu primer ritual</div></div>';return;}
+  if(!state.rituals.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-repeat"/></svg></div><div class="empty-state-text">Agrega tu primer ritual</div><button class="zen-btn zen-btn-primary" id="empty-rituals-btn">Agregar mi primer ritual</button></div>';c.querySelector('#empty-rituals-btn')?.addEventListener('click',()=>$('#ritual-input')?.focus());return;}
   const dl=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'], dk=['lun','mar','mie','jue','vie','sab','dom'];
   let h=`<table class="rituals-grid"><thead><tr><th style="text-align:left;padding-left:12px;">Ritual</th>${dl.map(d=>`<th>${d}</th>`).join('')}<th></th></tr></thead><tbody>`;
-  state.rituals.forEach(r=>{h+=`<tr><td class="ritual-name">${esc(r.name)}</td>${dk.map(d=>{const scheduled=r.days&&r.days[d]===true;return`<td><button class="ritual-check ${scheduled?'completed':''}" title="Programar este ritual" data-rid="${r.id}" data-day="${d}"></button></td>`;}).join('')}<td><button class="btn-delete" data-del-rit="${r.id}" style="opacity:0.5;">✕</button></td></tr>`;});
+  state.rituals.forEach(r=>{h+=`<tr><td class="ritual-name">${esc(r.name)}</td>${dk.map(d=>{const scheduled=r.days&&r.days[d]===true;return`<td><button class="ritual-check ${scheduled?'completed':''}" title="Programar este ritual" data-rid="${r.id}" data-day="${d}"></button></td>`;}).join('')}<td><button class="btn-delete" data-del-rit="${r.id}" style="opacity:0.5;" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></td></tr>`;});
   h+='</tbody></table>'; c.innerHTML=h;
   c.querySelectorAll('.ritual-check').forEach(b=>b.addEventListener('click',()=>{const r=state.rituals.find(x=>x.id===b.dataset.rid);if(r){if(!r.days)r.days={};r.days[b.dataset.day]=r.days[b.dataset.day]===true?false:true;saveState();renderRituals();renderDailyRitualsQuick();if($('#tab-reflection')&&$('#tab-reflection').classList.contains('active'))renderCalendar();showToast('Rutina semanal guardada');}}));
   c.querySelectorAll('[data-del-rit]').forEach(b=>b.addEventListener('click',()=>{state.rituals=state.rituals.filter(r=>r.id!==b.dataset.delRit);saveState();renderRituals();renderDailyRitualsQuick();}));
@@ -1443,6 +1433,46 @@ function initWeeklyReflection() {
       }
     });
   }
+}
+
+let weeklyWizardStep = 1;
+const WEEKLY_WIZARD_STEPS = 5;
+
+function goToWeeklyWizardStep(step) {
+  weeklyWizardStep = Math.min(Math.max(1, step), WEEKLY_WIZARD_STEPS);
+  const wizard = $('#weekly-wizard');
+  if (!wizard) return;
+  wizard.querySelectorAll('[data-wizard-panel]').forEach(panel => {
+    const active = Number(panel.dataset.wizardPanel) === weeklyWizardStep;
+    panel.hidden = !active;
+  });
+  wizard.querySelectorAll('.wizard-step-pill').forEach(pill => {
+    const active = Number(pill.dataset.wizardStep) === weeklyWizardStep;
+    pill.classList.toggle('active', active);
+    pill.setAttribute('aria-selected', String(active));
+  });
+  const backBtn = $('#weekly-wizard-back-btn');
+  const nextBtn = $('#weekly-wizard-next-btn');
+  const saveBtn = $('#save-weekly-btn');
+  if (backBtn) backBtn.hidden = weeklyWizardStep === 1;
+  if (nextBtn) nextBtn.hidden = weeklyWizardStep === WEEKLY_WIZARD_STEPS;
+  if (saveBtn) saveBtn.hidden = weeklyWizardStep !== WEEKLY_WIZARD_STEPS;
+}
+
+function initWeeklyWizard() {
+  const wizard = $('#weekly-wizard');
+  if (!wizard) return;
+  wizard.querySelectorAll('.wizard-step-pill').forEach(pill => {
+    pill.addEventListener('click', () => goToWeeklyWizardStep(Number(pill.dataset.wizardStep)));
+  });
+  $('#weekly-wizard-back-btn')?.addEventListener('click', () => goToWeeklyWizardStep(weeklyWizardStep - 1));
+  $('#weekly-wizard-next-btn')?.addEventListener('click', () => goToWeeklyWizardStep(weeklyWizardStep + 1));
+  wizard.addEventListener('keydown', event => {
+    if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (event.key === 'ArrowRight') { goToWeeklyWizardStep(weeklyWizardStep + 1); event.preventDefault(); }
+    else if (event.key === 'ArrowLeft') { goToWeeklyWizardStep(weeklyWizardStep - 1); event.preventDefault(); }
+  });
+  goToWeeklyWizardStep(1);
 }
 
 function saveWeeklyReflection() {
@@ -1486,6 +1516,7 @@ function saveWeeklyReflection() {
   logActivity(todayStr());
   showToast('Revisión semanal guardada');
   renderWeeklyReviewWizard(); renderSmartGoals(); renderDailyRitualsQuick(); renderRituals();
+  goToWeeklyWizardStep(1);
   if($('#tab-reflection')&&$('#tab-reflection').classList.contains('active'))renderCalendar();
 }
 
@@ -1605,10 +1636,12 @@ function saveSmart(){
 }
 function renderSmartGoals(){
   const c=$('#smart-goals-container');if(!c)return;
-  if(!state.smartGoals.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon">的</div><div class="empty-state-text">Crea tu primer objetivo SMART</div></div>';return;}
+  if(!state.smartGoals.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><div class="empty-state-text">Crea tu primer objetivo SMART</div><button class="zen-btn zen-btn-primary" id="empty-smart-btn">Crear mi primera meta</button></div>';c.querySelector('#empty-smart-btn')?.addEventListener('click',()=>$('#add-smart-btn')?.click());return;}
+  const focusIds = new Set(state.weekFocus?.goalIds || []);
   c.innerHTML=state.smartGoals.map(g=>{const st=new Date(g.startDate),now=new Date(),el=Math.floor((now-st)/864e5),pr=Math.min(100,Math.round(el/g.duration*100)),dl=Math.max(0,g.duration-el);
     const real=Math.min(100,Math.max(0,Number(g.progress||0)));
-    return`<div class="smart-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;"><div><div style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;margin-bottom:8px;">${esc(g.goal)}</div><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;"><div class="smart-field"><span class="smart-label">Medible</span><div style="font-size:0.9rem;">${esc(g.measurable||'—')}</div></div><div class="smart-field"><span class="smart-label">Relevancia</span><div style="font-size:0.9rem;">${esc(g.relevance||'—')}</div></div><div class="smart-field"><span class="smart-label">Alcanzable</span><div style="font-size:0.9rem;">${g.achievable?'Si':'No definido'}</div></div><div class="smart-field"><span class="smart-label">Plazo</span><div style="font-size:0.9rem;">${g.duration} dias (quedan ${dl})</div></div></div></div><button class="btn-delete" data-del-sm="${g.id}" style="opacity:0.6;">✕</button></div><div class="smart-progress-panel"><div class="smart-progress-row"><span class="smart-label">Avance real</span><strong>${real}%</strong></div><input type="range" class="timeline-slider smart-progress-input" min="0" max="100" value="${real}" data-progress-sm="${g.id}"><div class="smart-progress-track"><div style="width:${real}%"></div></div><label class="smart-label" style="margin-top:12px;">Siguiente avance visible</label><input class="zen-input smart-next-step-input" value="${esc(g.nextStep||'')}" data-next-sm="${g.id}" placeholder="Define el siguiente paso medible..."><div class="smart-time-progress"><span>Progreso temporal</span><span>${pr}%</span></div></div></div>`;}).join('');
+    const focusBadge = focusIds.has(g.id) ? '<span class="focus-badge">En foco</span>' : '';
+    return`<div class="smart-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;"><div><div style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;margin-bottom:8px;">${esc(g.goal)} ${focusBadge}</div><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;"><div class="smart-field"><span class="smart-label">Medible</span><div style="font-size:0.9rem;">${esc(g.measurable||'—')}</div></div><div class="smart-field"><span class="smart-label">Relevancia</span><div style="font-size:0.9rem;">${esc(g.relevance||'—')}</div></div><div class="smart-field"><span class="smart-label">Alcanzable</span><div style="font-size:0.9rem;">${g.achievable?'Si':'No definido'}</div></div><div class="smart-field"><span class="smart-label">Plazo</span><div style="font-size:0.9rem;">${g.duration} dias (quedan ${dl})</div></div></div></div><button class="btn-delete" data-del-sm="${g.id}" style="opacity:0.6;" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div><div class="smart-progress-panel"><div class="smart-progress-row"><span class="smart-label">Avance real</span><strong>${real}%</strong></div><input type="range" class="timeline-slider smart-progress-input" min="0" max="100" value="${real}" data-progress-sm="${g.id}"><div class="smart-progress-track"><div style="width:${real}%"></div></div><label class="smart-label" style="margin-top:12px;">Siguiente avance visible</label><input class="zen-input smart-next-step-input" value="${esc(g.nextStep||'')}" data-next-sm="${g.id}" placeholder="Define el siguiente paso medible..."><div class="smart-time-progress"><span>Progreso temporal</span><span>${pr}%</span></div></div></div>`;}).join('');
   c.querySelectorAll('[data-del-sm]').forEach(b=>b.addEventListener('click',()=>{state.smartGoals=state.smartGoals.filter(g=>g.id!==b.dataset.delSm);saveState();renderSmartGoals();}));
   c.querySelectorAll('[data-progress-sm]').forEach(inp=>{
     const updateSmartProgressUI = () => {
@@ -1643,7 +1676,7 @@ function saveStopDoing(){const inputs=$$('[data-stop-idx]');inputs.forEach(inp=>
 // ─── CIRCLE OF GIANTS ───
 function initGiants(){$('#add-giant-btn').addEventListener('click',()=>{if(state.circleOfGiants.length>=5){showToast('Máximo 5 gigantes');return;}$('#giant-form').style.display='block';$('#add-giant-btn').style.display='none';});$('#cancel-giant-btn').addEventListener('click',()=>{$('#giant-form').style.display='none';$('#add-giant-btn').style.display='';});$('#save-giant-btn').addEventListener('click',saveGiant);}
 function saveGiant(){const n=$('#giant-name').value.trim();if(!n){showToast('Escribe el nombre');return;}state.circleOfGiants.push({id:gid(),name:n,role:$('#giant-role').value.trim(),action:$('#giant-action').value.trim(),status:$('#giant-status').value,lastContact:todayStr()});saveState();$('#giant-name').value='';$('#giant-role').value='';$('#giant-action').value='';$('#giant-form').style.display='none';$('#add-giant-btn').style.display='';renderGiants();showToast('Gigante agregado');}
-function renderGiants(){const c=$('#giants-container');if(!c)return;if(!state.circleOfGiants.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon">縁</div><div class="empty-state-text">Agrega a las 5 personas que más impulsan tu crecimiento</div></div>';return;}c.innerHTML=state.circleOfGiants.map(g=>{const i=g.name.charAt(0).toUpperCase(),sc=g.status==='connected'?'connected':'to-reach',st=g.status==='connected'?'Conectado':'Por Contactar';return`<div class="giant-card"><div class="giant-avatar">${i}</div><div class="giant-info"><span class="giant-name">${esc(g.name)}</span><span class="giant-role">${esc(g.role||'Sin rol')}</span>${g.action?`<span style="font-size:0.7rem;color:var(--accent-orange);margin-top:2px;">→ ${esc(g.action)}</span>`:''}</div><div style="display:flex;align-items:center;gap:8px;"><span class="giant-status ${sc}">${st}</span><button class="btn-delete" data-del-gi="${g.id}" style="opacity:0.5;">✕</button></div></div>`;}).join('');c.querySelectorAll('[data-del-gi]').forEach(b=>b.addEventListener('click',()=>{state.circleOfGiants=state.circleOfGiants.filter(g=>g.id!==b.dataset.delGi);saveState();renderGiants();}));}
+function renderGiants(){const c=$('#giants-container');if(!c)return;if(!state.circleOfGiants.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></div><div class="empty-state-text">Agrega a las 5 personas que más impulsan tu crecimiento</div></div>';return;}c.innerHTML=state.circleOfGiants.map(g=>{const i=g.name.charAt(0).toUpperCase(),sc=g.status==='connected'?'connected':'to-reach',st=g.status==='connected'?'Conectado':'Por Contactar';return`<div class="giant-card"><div class="giant-avatar">${i}</div><div class="giant-info"><span class="giant-name">${esc(g.name)}</span><span class="giant-role">${esc(g.role||'Sin rol')}</span>${g.action?`<span style="font-size:0.7rem;color:var(--accent-orange);margin-top:2px;">→ ${esc(g.action)}</span>`:''}</div><div style="display:flex;align-items:center;gap:8px;"><span class="giant-status ${sc}">${st}</span><button class="btn-delete" data-del-gi="${g.id}" style="opacity:0.5;" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div></div>`;}).join('');c.querySelectorAll('[data-del-gi]').forEach(b=>b.addEventListener('click',()=>{state.circleOfGiants=state.circleOfGiants.filter(g=>g.id!==b.dataset.delGi);saveState();renderGiants();}));}
 
 // ─── QUARTERLY 10 ───
 function initQuarterly(){if($('#save-quarterly-btn'))$('#save-quarterly-btn').addEventListener('click',saveQuarterly);}
@@ -1824,12 +1857,24 @@ function renderDayDetail(dateStr) {
       ${Array.isArray(items) ? items.map(item => `<div class="cal-detail-item">${esc(item)}</div>`).join('') : items}
     </div>
   `).join('');
-  content.innerHTML = html || '<div class="empty-state" style="padding:20px;"><div class="empty-state-text">No hay actividades registradas este dia.</div></div>';
+  content.innerHTML = html || '<div class="empty-state empty-state-compact"><div class="empty-state-text">No hay actividades registradas este dia.</div><button class="zen-btn zen-btn-primary" id="empty-calendar-day-btn">Planear hoy</button></div>';content.querySelector('#empty-calendar-day-btn')?.addEventListener('click',()=>switchTab('hoy',{focus:true}));
   panel.style.display = 'block';
   renderCalendar();
 }
 
 // ─── PROFILE & AI CONFIG ───
+function openAiSettingsModal() {
+  const modal = $('#ai-settings-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  renderProfile(); // Pre-fill AI settings
+}
+
+function closeAiSettingsModal() {
+  const modal = $('#ai-settings-modal');
+  if (modal) modal.style.display = 'none';
+}
+
 function initProfile() {
   const btn = $('#save-profile-btn');
   if (btn) btn.addEventListener('click', saveProfile);
@@ -1847,22 +1892,13 @@ function initProfile() {
   
   $$('.ai-report-btn').forEach(b => b.addEventListener('click', () => generateAIReport(b.dataset.type)));
 
-  const aiSettingsModal = $('#ai-settings-modal');
-  const openAiBtn = $('#settings-toggle-btn');
   const closeAiBtn = $('#close-ai-settings-btn');
-  
-  if (openAiBtn && aiSettingsModal) {
-    openAiBtn.addEventListener('click', () => {
-      aiSettingsModal.style.display = 'flex';
-      renderProfile(); // Pre-fill AI settings
-    });
+  if (closeAiBtn) {
+    closeAiBtn.addEventListener('click', () => closeAiSettingsModal());
   }
-  if (closeAiBtn && aiSettingsModal) {
-    closeAiBtn.addEventListener('click', () => aiSettingsModal.style.display = 'none');
-  }
-  $('#open-ai-connection-profile-btn')?.addEventListener('click', () => $('#settings-toggle-btn')?.click());
+  $('#open-ai-connection-profile-btn')?.addEventListener('click', () => openAiSettingsModal());
   $('#restart-onboarding-btn')?.addEventListener('click', () => startOnboardingTour(true));
-  $('#open-advanced-settings-btn')?.addEventListener('click', () => $('#settings-toggle-btn')?.click());
+  $('#open-advanced-settings-btn')?.addEventListener('click', () => openAiSettingsModal());
   $('#export-data-btn')?.addEventListener('click', () => {
     const payload = JSON.stringify(getCloudSafeState(), null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
@@ -2009,17 +2045,17 @@ function renderProgress() {
   const ritualRate=(()=>{if(!state.rituals.length)return 0;const dk=['dom','lun','mar','mie','jue','vie','sab'];let total=0,done=0;state.rituals.forEach(r=>{dk.forEach(d=>{total++;if(r.days&&r.days[d]===true)done++;});});return total>0?Math.round(done/total*100):0;})();
 
   const stats=[
-    {icon:'◆',value:streak,label:'Racha de dias',color:'var(--accent-orange)'},
-    {icon:'+',value:totalV,label:'Victorias',color:'var(--accent-green)'},
-    {icon:'↻',value:totalB,label:'Creencias rotas',color:'var(--accent-orange)'},
-    {icon:'I',value:totalM,label:'Mantras activos',color:'var(--accent-green)'},
-    {icon:'•',value:totalP,label:'Orgullos',color:'var(--accent-gold)'},
-    {icon:'M',value:totalG,label:'Metas SMART',color:'var(--accent-orange)'},
-    {icon:'R',value:ritualRate+'%',label:'Rituales semana',color:'var(--accent-green)'},
-    {icon:'G',value:state.circleOfGiants.length,label:'Gigantes',color:'var(--accent-gold)'}
+    {icon:'i-flame',value:streak,label:'Racha de dias',color:'var(--accent-orange)'},
+    {icon:'i-check',value:totalV,label:'Victorias',color:'var(--accent-green)'},
+    {icon:'i-refresh-cw',value:totalB,label:'Creencias rotas',color:'var(--accent-orange)'},
+    {icon:'i-target',value:totalM,label:'Mantras activos',color:'var(--accent-green)'},
+    {icon:'i-star',value:totalP,label:'Orgullos',color:'var(--accent-gold)'},
+    {icon:'i-flag',value:totalG,label:'Metas SMART',color:'var(--accent-orange)'},
+    {icon:'i-repeat',value:ritualRate+'%',label:'Rituales semana',color:'var(--accent-green)'},
+    {icon:'i-users',value:state.circleOfGiants.length,label:'Gigantes',color:'var(--accent-gold)'}
   ];
   const statsGrid = $('#stats-grid');
-  if(statsGrid) statsGrid.innerHTML=stats.map(s=>`<div class="stat-card"><div class="stat-icon">${s.icon}</div><div class="stat-value" style="color:${s.color};">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('');
+  if(statsGrid) statsGrid.innerHTML=stats.map(s=>`<div class="stat-card"><div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#${s.icon}"/></svg></div><div class="stat-value" style="color:${s.color};">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('');
   renderWeeklyReviewTrend();
 
   // Heatmap
@@ -2047,7 +2083,7 @@ function renderWeeklyReviewTrend() {
   if (!c) return;
   const reviews = (state.weeklyReviews || []).slice(-8);
   if (!reviews.length) { c.innerHTML = ''; return; }
-  c.innerHTML = `<div class="glass-card"><div class="card-header"><div class="card-title-group"><div class="card-icon green">↗</div><h2 class="card-title">Tendencia de revisiones</h2></div></div><div class="trend-bars">${reviews.map(review => { const task = Number(review.stats?.taskRate || 0); const ritual = Number(review.stats?.ritualRate || 0); return `<div class="trend-bar-row"><span>${esc(review.weekKey || '')}</span><div class="trend-bar"><i style="width:${task}%"></i></div><div class="trend-bar ritual"><i style="width:${ritual}%"></i></div></div>`; }).join('')}</div></div>`;
+  c.innerHTML = `<div class="glass-card"><div class="card-header"><div class="card-title-group"><div class="card-icon green"><svg class="icon" aria-hidden="true"><use href="#i-trending-up"/></svg></div><h2 class="card-title">Tendencia de revisiones</h2></div></div><div class="trend-bars">${reviews.map(review => { const task = Number(review.stats?.taskRate || 0); const ritual = Number(review.stats?.ritualRate || 0); return `<div class="trend-bar-row"><span>${esc(review.weekKey || '')}</span><div class="trend-bar"><i style="width:${task}%"></i></div><div class="trend-bar ritual"><i style="width:${ritual}%"></i></div></div>`; }).join('')}</div></div>`;
 }
 
 function renderLifeAssessment() {
@@ -2383,22 +2419,21 @@ async function testAIConnection(source = 'profile') {
   }
 }
 
-function applyThemePreset(presetCode = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden', persist = false) {
-  const preset = THEME_PRESETS.some(item => item.code === presetCode) ? presetCode : 'zen-garden';
-  document.body.classList.remove(...THEME_CLASS_NAMES);
-  document.body.classList.add(`theme-${preset}`);
-  if (preset === 'paper') {
-    document.body.classList.add('light-theme');
-    localStorage.setItem('rokaLightTheme', 'true');
-    const btn = $('#theme-toggle-btn');
-    if (btn) btn.textContent = '◑';
-  } else if (persist) {
-    document.body.classList.remove('light-theme');
-    localStorage.setItem('rokaLightTheme', 'false');
-    const btn = $('#theme-toggle-btn');
-    if (btn) btn.textContent = '◐';
+function resolveThemeCode(selection) {
+  if (selection === 'auto') {
+    const prefersLight = window.matchMedia?.('(prefers-color-scheme: light)')?.matches;
+    return prefersLight ? THEME_AUTO_LIGHT : THEME_AUTO_DARK;
   }
-  if (persist) localStorage.setItem(THEME_PRESET_KEY, preset);
+  return THEME_PRESETS.some(item => item.code === selection) ? selection : 'zen-garden';
+}
+
+function applyThemePreset(selection = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden', persist = false) {
+  const storedSelection = selection === 'auto' || THEME_PRESETS.some(item => item.code === selection) ? selection : 'zen-garden';
+  const resolved = resolveThemeCode(storedSelection);
+  document.body.classList.remove(...THEME_CLASS_NAMES);
+  document.body.classList.add(`theme-${resolved}`);
+  document.body.classList.toggle('light-theme', resolved === 'paper');
+  if (persist) localStorage.setItem(THEME_PRESET_KEY, storedSelection);
   renderThemePresets();
 }
 
@@ -2406,7 +2441,8 @@ function renderThemePresets() {
   const container = $('#theme-preset-grid');
   if (!container) return;
   const active = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden';
-  container.innerHTML = THEME_PRESETS.map(preset => `
+  const options = [...THEME_PRESETS, { code: 'auto', name: 'Automático', description: 'Sigue el tema de tu dispositivo (Zen o Papel)', swatches: ['#8fcfba', '#EFE8DA'] }];
+  container.innerHTML = options.map(preset => `
     <button class="theme-preset-card ${active === preset.code ? 'active' : ''}" type="button" data-theme-preset="${esc(preset.code)}" aria-pressed="${active === preset.code}">
       <span class="theme-preset-swatches">${preset.swatches.map(color => `<i style="background:${esc(color)}"></i>`).join('')}</span>
       <b>${esc(preset.name)}</b>
@@ -2785,7 +2821,7 @@ function renderAIReportsList() {
   if (!container) return;
   const reports = getVisibleReports();
   if (!reports.length) {
-    container.innerHTML = '<div class="empty-reports"><h3>Todavía no hay informes</h3><p>Genera un mapa personal o un diagnóstico para convertir tus datos en decisiones.</p></div>';
+    container.innerHTML = '<div class="empty-reports"><h3>Todavía no hay informes</h3><p>Genera un mapa personal o un diagnóstico para convertir tus datos en decisiones.</p><button class="zen-btn zen-btn-primary" id="empty-reports-btn">Generar mi primer informe</button></div>';container.querySelector('#empty-reports-btn')?.addEventListener('click',()=>$('.map-report-btn[data-report="personal"]')?.click());
     return;
   }
   container.innerHTML = reports.map(report => `
@@ -2967,28 +3003,11 @@ function safeInit(fn, name) {
 }
 
 function initThemeToggle() {
-  const btn = $('#theme-toggle-btn');
-  if(!btn) return;
-  applyThemePreset(localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden');
-  const storedTheme = localStorage.getItem('rokaLightTheme');
+  const stored = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden';
+  applyThemePreset(stored);
   const systemTheme = window.matchMedia?.('(prefers-color-scheme: light)');
-  const isLight = storedTheme === null ? Boolean(systemTheme?.matches) : storedTheme === 'true';
-  if(isLight) { document.body.classList.add('light-theme'); btn.textContent = '◑'; }
-  else { document.body.classList.remove('light-theme'); btn.textContent = '◐'; }
-
-  systemTheme?.addEventListener?.('change', event => {
-    if (localStorage.getItem('rokaLightTheme') !== null) return;
-    document.body.classList.toggle('light-theme', event.matches);
-    btn.textContent = event.matches ? '◑' : '◐';
-  });
-  
-  btn.addEventListener('click', () => {
-    document.body.classList.toggle('light-theme');
-    const nowLight = document.body.classList.contains('light-theme');
-    localStorage.setItem('rokaLightTheme', nowLight);
-    btn.textContent = nowLight ? '◑' : '◐';
-    showToast(nowLight ? 'Modo claro activado' : 'Modo oscuro activado');
-    renderThemePresets();
+  systemTheme?.addEventListener?.('change', () => {
+    if ((localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden') === 'auto') applyThemePreset('auto');
   });
 }
 
@@ -3004,6 +3023,7 @@ function initApp() {
   safeInit(initPlanner, 'initPlanner');
   safeInit(initRituals, 'initRituals');
   safeInit(initWeeklyReflection, 'initWeeklyReflection');
+  safeInit(initWeeklyWizard, 'initWeeklyWizard');
   safeInit(initSmartGoals, 'initSmartGoals');
   safeInit(initLearning, 'initLearning');
   safeInit(initStopDoing, 'initStopDoing');
@@ -3046,7 +3066,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v37-product-system'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v39-visual-review'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
