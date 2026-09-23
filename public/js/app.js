@@ -3066,7 +3066,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v39-visual-review'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v40-button-fix'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

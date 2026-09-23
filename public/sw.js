@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v39-visual-review';
+const CACHE_NAME = 'roka-mind-v40-button-fix';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;

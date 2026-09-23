@@ -3925,3 +3925,13 @@ body.light-theme .zen-input, body.light-theme .zen-textarea, body.light-theme se
   .report-item { break-inside: avoid; box-shadow: none; border: 1px solid #ddd; }
   body { background: white; color: black; }
 }
+
+/* Botones con ícono dentro de filas flexibles: nunca se encogen por debajo de su contenido
+   (evita que el "+" se salga del botón cuando la fila no cabe). */
+.card-header .zen-btn,
+.ritual-add-row .zen-btn,
+.planner-input-row .zen-btn { flex-shrink: 0; white-space: nowrap; }
+.card-header:has(.ritual-add-row) { flex-wrap: wrap; row-gap: 14px; }
+.ritual-add-row { flex: 1 1 100%; flex-wrap: wrap; }
+.ritual-add-row .ritual-input-name { flex: 2 1 220px; width: auto; }
+.ritual-add-row select.zen-input { flex: 1 1 160px; min-width: 0; }
