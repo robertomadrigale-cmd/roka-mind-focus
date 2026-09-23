@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v35-toast-click-fix';
+const CACHE_NAME = 'roka-mind-v36-daily-rituals';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;

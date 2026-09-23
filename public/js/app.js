@@ -1246,7 +1246,7 @@ function updatePlannerProgress(tasks) {
 // ─── DAILY RITUALS QUICK ───
 function renderDailyRitualsQuick() {
   const c=$('#daily-rituals-quick'); if(!c)return;
-  if(!state.rituals.length){c.innerHTML='<div class="empty-state" style="padding:20px;"><div class="empty-state-text" style="font-size:0.8rem;">Agrega rituales en "Semanal"</div></div>';return;}
+  if(!state.rituals.length){c.innerHTML='<div class="empty-state" style="padding:20px;"><div class="empty-state-text" style="font-size:0.8rem;">Escribe arriba tu primer ritual diario. Para elegir días específicos usa "Editar días".</div></div>';return;}
   const date = todayStr();
   const scheduled = state.rituals.filter(r => isRitualScheduled(r, date));
   const list = scheduled.length ? scheduled : state.rituals;
@@ -1255,8 +1255,15 @@ function renderDailyRitualsQuick() {
 }
 
 // ─── RITUALS (Weekly) ───
-function initRituals() { $('#add-ritual-btn').addEventListener('click',addRitual); $('#ritual-input').addEventListener('keydown',e=>{if(e.key==='Enter')addRitual();}); }
-function addRitual() { const i=$('#ritual-input'),n=i.value.trim(); if(!n)return; if(state.rituals.length>=10){showToast('Máximo 10 rituales');return;} state.rituals.push({id:gid(),name:n,days:{lun:false,mar:false,mie:false,jue:false,vie:false,sab:false,dom:false}}); saveState();i.value='';renderRituals();renderDailyRitualsQuick();showToast('Ritual agregado'); }
+function initRituals() {
+  $('#add-ritual-btn').addEventListener('click',()=>addRitual('#ritual-input',false));
+  $('#ritual-input').addEventListener('keydown',e=>{if(e.key==='Enter')addRitual('#ritual-input',false);});
+  $('#add-daily-ritual-btn')?.addEventListener('click',()=>addRitual('#daily-ritual-input',true));
+  $('#daily-ritual-input')?.addEventListener('keydown',e=>{if(e.key==='Enter')addRitual('#daily-ritual-input',true);});
+  $('#edit-ritual-days-btn')?.addEventListener('click',()=>{switchTab('progreso',{focus:true});document.querySelector('.reflection-sub-tab[data-target="reflection-weekly"]')?.click();});
+}
+// Desde "Hoy" el ritual se crea programado todos los días; desde "Semanal" se eligen los días en la tabla.
+function addRitual(inputSelector='#ritual-input', everyDay=false) { const i=$(inputSelector),n=i?.value.trim(); if(!n)return; if(state.rituals.length>=10){showToast('Máximo 10 rituales');return;} state.rituals.push({id:gid(),name:n,days:{lun:everyDay,mar:everyDay,mie:everyDay,jue:everyDay,vie:everyDay,sab:everyDay,dom:everyDay}}); saveState();i.value='';renderRituals();renderDailyRitualsQuick();showToast(everyDay?'Ritual diario agregado':'Ritual agregado'); }
 function renderRituals() {
   const c=$('#rituals-container'); if(!c)return;
   if(!state.rituals.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon">巡</div><div class="empty-state-text">Agrega tu primer ritual</div></div>';return;}
@@ -2784,7 +2791,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v35-toast-click-fix'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v36-daily-rituals'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
