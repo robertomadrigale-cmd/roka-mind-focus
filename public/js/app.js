@@ -6,7 +6,7 @@ import { LifeWheel, LIFE_WHEEL_AXES } from "./components/LifeWheel.js";
 import { localDateKey } from "./lib/dates.js";
 import { choosePersistedState, hasMeaningfulUserData, jsonSizeBytes, pruneStateForCloud, selectLocalCandidateForUser } from "./lib/persistence.js";
 import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, migrateState as migrateSystemState, overdueTasks, ritualAdherence, shouldPromptWeeklyReview, weekKey, weekStats } from "./lib/system.js";
-import { callAIGateway } from "./services/aiGateway.js?v=10.8";
+import { callAIGateway } from "./services/aiGateway.js?v=10.9";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
 
 // ==========================================
@@ -2305,9 +2305,7 @@ function updateAIConnectionStatus(message = '') {
   const hasKey = Boolean(getStoredAIKey());
   const provider = getAIProvider();
   const model = getAIModel(provider);
-  const route = provider === 'openai'
-    ? 'ruta: gateway /api/ai'
-    : `ruta: directo ${provider === 'google' ? 'Gemini' : 'DeepSeek'}`;
+  const route = `ruta: directo ${provider === 'google' ? 'Gemini' : provider === 'deepseek' ? 'DeepSeek' : 'OpenAI'}`;
   const text = message || (hasKey
     ? `Clave IA guardada. Proveedor: ${provider}. Modelo: ${model}. ${route}.`
     : `Falta API key o backend activo. Proveedor: ${provider}. Modelo: ${model}.`);
@@ -2326,9 +2324,7 @@ function syncAIModelDefault(event) {
   localStorage.setItem(AI_PROVIDER_KEY, provider);
   localStorage.setItem(AI_MODEL_KEY, modelEl.value);
   syncAIConnectionFormFields(provider, modelEl.value);
-  updateAIConnectionStatus(provider === 'openai'
-    ? 'OpenAI usa el gateway /api/ai. Si Firebase Functions no está desplegado, prueba con Google Gemini o DeepSeek.'
-    : '');
+  updateAIConnectionStatus();
 }
 
 function getAIFormFields(source = 'profile') {
@@ -2357,11 +2353,7 @@ function syncAIConnectionFormFields(provider = getAIProvider(), model = getAIMod
   if ($('#ai-model')) $('#ai-model').value = model;
   if ($('#profile-ai-provider')) $('#profile-ai-provider').value = provider;
   if ($('#profile-ai-model')) $('#profile-ai-model').value = model;
-  if (provider === 'openai') {
-    updateAIConnectionStatus('OpenAI usa el gateway /api/ai. Si Firebase Functions no está desplegado, prueba con Google Gemini o DeepSeek.');
-  } else {
-    updateAIConnectionStatus();
-  }
+  updateAIConnectionStatus();
 }
 
 function saveAIKeyForSession(source = 'profile') {
@@ -2375,7 +2367,7 @@ function saveAIKeyForSession(source = 'profile') {
   storeAIKey(key, rememberEl?.checked === true);
   if ($('#ai-api-key')) $('#ai-api-key').value = '';
   if ($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
-  const route = config.provider === 'openai' ? 'gateway /api/ai' : `directo ${config.provider === 'google' ? 'Gemini' : 'DeepSeek'}`;
+  const route = `directo ${config.provider === 'google' ? 'Gemini' : config.provider === 'deepseek' ? 'DeepSeek' : 'OpenAI'}`;
   updateAIConnectionStatus(`Clave IA guardada. Proveedor: ${config.provider}. Modelo: ${config.model}. Ruta: ${route}.`);
   showToast('Clave IA guardada');
 }
@@ -2410,7 +2402,7 @@ async function testAIConnection(source = 'profile') {
       if ($('#ai-api-key')) $('#ai-api-key').value = '';
       if ($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
     }
-    const route = result.route || (config.provider === 'openai' ? 'gateway /api/ai' : `directo ${config.provider}`);
+    const route = result.route || `directo ${config.provider}`;
     updateAIConnectionStatus(`Conexión IA verificada. Proveedor: ${config.provider}. Modelo: ${config.model}. Ruta usada: ${route}.`);
     showToast('Conexión IA lista');
   } catch (error) {
@@ -3066,7 +3058,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v40-button-fix'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v41-openai-direct'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
