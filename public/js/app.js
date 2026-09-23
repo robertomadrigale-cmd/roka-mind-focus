@@ -2784,7 +2784,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v34-audit-hardening'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v35-toast-click-fix'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

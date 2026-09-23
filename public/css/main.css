@@ -2415,6 +2415,10 @@ body.light-theme .auth-overlay {
 
 .toast.show { transform: translateY(0); opacity: 1; }
 
+/* El toast es solo informativo: nunca debe bloquear clics (p. ej. la barra de navegación inferior). */
+.toast { pointer-events: none; visibility: hidden; }
+.toast.show { visibility: visible; }
+
 /* ─────────────────────────────────────────────
    36. EMPTY STATE
    ───────────────────────────────────────────── */
@@ -2726,6 +2730,7 @@ body.meditation-fullscreen-active .timer-label { display: none !important; }
   .sanctuary-hero { padding-top: 16px; }
   .sanctuary-primary { padding: 20px; }
   .toast { bottom: calc(var(--bottom-nav-height) + 12px); }
+  .cookie-banner { bottom: calc(var(--bottom-nav-height) + 8px); }
 }
 
 /* Small Mobile */
