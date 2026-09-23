@@ -6,7 +6,7 @@ import { LifeWheel, LIFE_WHEEL_AXES } from "./components/LifeWheel.js";
 import { localDateKey } from "./lib/dates.js";
 import { choosePersistedState, hasMeaningfulUserData, jsonSizeBytes, pruneStateForCloud, selectLocalCandidateForUser } from "./lib/persistence.js";
 import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, migrateState as migrateSystemState, overdueTasks, ritualAdherence, shouldPromptWeeklyReview, weekKey, weekStats } from "./lib/system.js";
-import { callAIGateway } from "./services/aiGateway.js?v=10.9";
+import { callAIGateway } from "./services/aiGateway.js?v=10.10";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
 
 // ==========================================
@@ -3058,7 +3058,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v41-openai-direct'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v42-openai-errors'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

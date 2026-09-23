@@ -51,6 +51,11 @@ async function callDirectProvider(payload) {
   return callDirectOpenAI(payload);
 }
 
+// Normaliza nombres escritos a mano: "GPT-5 Nano" -> "gpt-5-nano".
+function normalizeOpenAIModel(model) {
+  return String(model || 'gpt-4o').trim().toLowerCase().replace(/\s+/g, '-');
+}
+
 async function callDirectOpenAI(payload) {
   const input = buildConversationPrompt(payload);
   let response;
@@ -62,13 +67,13 @@ async function callDirectOpenAI(payload) {
         Authorization: `Bearer ${payload.clientApiKey}`
       },
       body: JSON.stringify({
-        model: payload.model || 'gpt-4o',
+        model: normalizeOpenAIModel(payload.model),
         instructions: payload.systemInstruction || 'Responde en español con claridad.',
         input
       })
     });
   } catch (error) {
-    throw new Error('No se pudo conectar con OpenAI. Revisa tu conexión a internet e intenta de nuevo.');
+    throw new Error(`OpenAI rechazó la solicitud o no hay conexión. Revisa que la llave sea válida y tenga saldo, y que el modelo exista (escribiste: ${normalizeOpenAIModel(payload.model)}; ejemplos: gpt-5-nano, gpt-4o-mini).`);
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.error) throw new Error(data.error?.message || 'OpenAI no respondió correctamente.');

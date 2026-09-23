@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v41-openai-direct';
+const CACHE_NAME = 'roka-mind-v42-openai-errors';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;
