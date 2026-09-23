@@ -85,13 +85,33 @@ const CLOUD_SAVE_DEBOUNCE_MS = 1500;
 const LOCAL_STATE_WARN_BYTES = 4 * 1024 * 1024;
 const THEME_PRESET_KEY = 'rokaMindThemePreset';
 const THEME_PRESETS = [
-  { code: 'zen-garden', name: 'Zen', description: 'Niebla, piedra y calma profunda', swatches: ['#07120e', '#163226', '#8fcfba', '#d8c08a'] },
-  { code: 'paper', name: 'Papel', description: 'Claro y descansado', swatches: ['#EFE8DA', '#FFF9EF', '#8E6A3C'] },
-  { code: 'graphite', name: 'Grafito', description: 'Oscuro de alto contraste', swatches: ['#080A0D', '#171C24', '#78B7FF'] }
+  { code: 'zen-garden', name: 'Jardín Zen', description: 'Musgo, piedra y niebla', light: false, swatches: ['#07120e', '#163226', '#8fcfba', '#d8c08a'] },
+  { code: 'sumi', name: 'Sumi-e', description: 'Tinta, papel de arroz y sello bermellón', light: false, swatches: ['#0e0d0c', '#221f1b', '#e0d6c2', '#c8553d'] },
+  { code: 'tsukimi', name: 'Tsukimi', description: 'Noche índigo bajo la luna', light: false, swatches: ['#0b0f22', '#1b2242', '#e8d9a8', '#8fa7e8'] },
+  { code: 'nami', name: 'Nami', description: 'Olas seigaiha y mar profundo', light: false, swatches: ['#06171b', '#123037', '#6fd0c6', '#e2c58a'] },
+  { code: 'momiji', name: 'Momiji', description: 'Otoño cálido de arces', light: false, swatches: ['#170d0a', '#321d15', '#e9a066', '#d9653b'] },
+  { code: 'graphite', name: 'Grafito', description: 'Oscuro de alto contraste', light: false, swatches: ['#080A0D', '#171C24', '#78B7FF'] },
+  { code: 'paper', name: 'Washi', description: 'Papel artesanal y luz suave', light: true, swatches: ['#EFE8DA', '#FFF9EF', '#8E6A3C'] },
+  { code: 'karesansui', name: 'Karesansui', description: 'Arena rastrillada y piedra', light: true, swatches: ['#ebe3d3', '#faf6ed', '#5e6f6b', '#a07c4a'] },
+  { code: 'sakura', name: 'Sakura', description: 'Pétalos de cerezo en primavera', light: true, swatches: ['#f7ecee', '#fffafb', '#b45a7a', '#c08a4a'] },
+  { code: 'matcha', name: 'Matcha', description: 'Bambú y té verde', light: true, swatches: ['#eceee0', '#fbfcf5', '#5f8a36', '#a8894a'] },
+  { code: 'kiri', name: 'Kiri', description: 'Niebla sobre las montañas', light: true, swatches: ['#e4e9ec', '#f7f9fa', '#4f7f8a', '#9a8a6a'] }
 ];
 const THEME_CLASS_NAMES = THEME_PRESETS.map(preset => `theme-${preset.code}`);
 const THEME_AUTO_LIGHT = 'paper';
 const THEME_AUTO_DARK = 'zen-garden';
+const THEME_DAILY_KEY = 'rokaMindThemeDaily';
+
+// "Tema del día": rota por todos los temas, uno distinto cada día.
+function dailyThemeCode(date = new Date()) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((date - start) / 86400000);
+  return THEME_PRESETS[dayOfYear % THEME_PRESETS.length].code;
+}
+
+function isDailyThemeOn() {
+  try { return localStorage.getItem(THEME_DAILY_KEY) === 'true'; } catch { return false; }
+}
 
 const STORAGE_KEY = 'rokaMindState';
 let state = JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -2455,19 +2475,25 @@ function resolveThemeCode(selection) {
 
 function applyThemePreset(selection = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden', persist = false) {
   const storedSelection = selection === 'auto' || THEME_PRESETS.some(item => item.code === selection) ? selection : 'zen-garden';
-  const resolved = resolveThemeCode(storedSelection);
+  const resolved = isDailyThemeOn() && !persist ? dailyThemeCode() : resolveThemeCode(storedSelection);
+  const preset = THEME_PRESETS.find(item => item.code === resolved) || THEME_PRESETS[0];
   document.body.classList.remove(...THEME_CLASS_NAMES);
-  document.body.classList.add(`theme-${resolved}`);
-  document.body.classList.toggle('light-theme', resolved === 'paper');
-  if (persist) localStorage.setItem(THEME_PRESET_KEY, storedSelection);
+  document.body.classList.add(`theme-${preset.code}`);
+  document.body.classList.toggle('light-theme', preset.light === true);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', preset.swatches[0]);
+  if (persist) {
+    localStorage.setItem(THEME_PRESET_KEY, storedSelection);
+    localStorage.setItem(THEME_DAILY_KEY, 'false');
+  }
   renderThemePresets();
+  renderThemeQuickMenu();
 }
 
 function renderThemePresets() {
   const container = $('#theme-preset-grid');
   if (!container) return;
   const active = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden';
-  const options = [...THEME_PRESETS, { code: 'auto', name: 'Automático', description: 'Sigue el tema de tu dispositivo (Zen o Papel)', swatches: ['#8fcfba', '#EFE8DA'] }];
+  const options = [...THEME_PRESETS, { code: 'auto', name: 'Automático', description: 'Sigue tu dispositivo (Jardín Zen o Washi)', swatches: ['#8fcfba', '#EFE8DA'] }];
   container.innerHTML = options.map(preset => `
     <button class="theme-preset-card ${active === preset.code ? 'active' : ''}" type="button" data-theme-preset="${esc(preset.code)}" aria-pressed="${active === preset.code}">
       <span class="theme-preset-swatches">${preset.swatches.map(color => `<i style="background:${esc(color)}"></i>`).join('')}</span>
@@ -3028,6 +3054,46 @@ function safeInit(fn, name) {
   catch(e) { console.error('Error en ' + name + ':', e); }
 }
 
+function currentThemeCode() {
+  return THEME_PRESETS.find(item => document.body.classList.contains(`theme-${item.code}`))?.code || 'zen-garden';
+}
+
+function renderThemeQuickMenu() {
+  const menu = $('#theme-quick-menu');
+  if (!menu) return;
+  const active = currentThemeCode();
+  menu.innerHTML = `<div class="theme-quick-grid">${THEME_PRESETS.map(preset => `
+    <button type="button" class="theme-quick-dot ${preset.code === active ? 'active' : ''}" data-quick-theme="${esc(preset.code)}" aria-pressed="${preset.code === active}" title="${esc(preset.description)}">
+      <i style="background: linear-gradient(135deg, ${esc(preset.swatches[0])} 0 50%, ${esc(preset.swatches[2] || preset.swatches[1])} 50% 100%)"></i>
+      <span>${esc(preset.name)}</span>
+    </button>`).join('')}</div>
+    <label class="theme-quick-footer"><span>Tema del día (cambia solo cada día)</span><input type="checkbox" id="theme-daily-toggle" ${isDailyThemeOn() ? 'checked' : ''}></label>`;
+  menu.querySelectorAll('[data-quick-theme]').forEach(button => button.addEventListener('click', () => {
+    applyThemePreset(button.dataset.quickTheme, true);
+  }));
+  menu.querySelector('#theme-daily-toggle')?.addEventListener('change', event => {
+    localStorage.setItem(THEME_DAILY_KEY, event.target.checked ? 'true' : 'false');
+    applyThemePreset(localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden');
+    showToast(event.target.checked ? 'Cada día tendrás un tema distinto' : 'Tema fijo');
+  });
+}
+
+function initThemeQuickMenu() {
+  const btn = $('#theme-quick-btn');
+  const menu = $('#theme-quick-menu');
+  if (!btn || !menu) return;
+  const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('click', event => {
+    event.stopPropagation();
+    menu.hidden = !menu.hidden;
+    btn.setAttribute('aria-expanded', String(!menu.hidden));
+    if (!menu.hidden) renderThemeQuickMenu();
+  });
+  menu.addEventListener('click', event => event.stopPropagation());
+  document.addEventListener('click', close);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+}
+
 function initThemeToggle() {
   const stored = localStorage.getItem(THEME_PRESET_KEY) || 'zen-garden';
   applyThemePreset(stored);
@@ -3039,6 +3105,7 @@ function initThemeToggle() {
 
 function initApp() {
   safeInit(initThemeToggle, 'initThemeToggle');
+  safeInit(initThemeQuickMenu, 'initThemeQuickMenu');
   safeInit(updateHeaderDate, 'updateHeaderDate');
   safeInit(initTabs, 'initTabs');
   safeInit(initCollapsibleSections, 'initCollapsibleSections');
@@ -3092,7 +3159,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v43-sync-openai'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v44-zen-themes'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

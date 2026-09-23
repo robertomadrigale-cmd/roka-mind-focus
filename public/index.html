@@ -9,12 +9,12 @@
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon.svg">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="css/main.css?v=41-sync-v5">
+  <link rel="stylesheet" href="css/main.css?v=44-sync-v5">
 </head>
 <body>
   <!-- ===== ICON SPRITE ===== -->
   <svg hidden aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-    <symbol id="i-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8h2.1A5.3 5.3 0 0 0 22 9.7C22 5.9 17.5 3 12 3Z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10.5" cy="7" r="1.2"/><circle cx="15" cy="7" r="1.2"/></symbol><symbol id="i-timer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
@@ -97,6 +97,8 @@
         </div>
       </div>
       <div class="header-right">
+        <button id="theme-quick-btn" class="theme-quick-btn" type="button" aria-label="Cambiar tema" aria-haspopup="true" aria-expanded="false" title="Cambiar tema"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg></button>
+        <div id="theme-quick-menu" class="theme-quick-menu" role="dialog" aria-label="Temas" hidden></div>
         <div class="streak-badge" id="streak-badge" title="Racha de días activos">
           <svg class="icon streak-fire" aria-hidden="true"><use href="#i-flame"/></svg>
           <span class="streak-count" id="streak-count">0</span>
@@ -113,23 +115,23 @@
     <aside class="sidebar" id="sidebar">
       <nav class="sidebar-nav">
         <button class="nav-item active" data-tab="hoy" data-route="hoy">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v2M5.6 6.6l1.4 1.4M18.4 6.6 17 8M3 17h18M7 17a5 5 0 0 1 10 0M6 21h12"/></svg>
           <span>Hoy</span>
         </button>
         <button class="nav-item" data-tab="metas" data-route="metas">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20 9.5 8.5l3.8 6.2 2.2-3.2L21 20Z"/><path d="m8 11 1.5-2.5L11 11"/></svg>
           <span>Metas</span>
         </button>
         <button class="nav-item" data-tab="semana" data-route="semana">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.6 6.6 0 0 0 10.7 10.7Z"/></svg>
           <span>Semana</span>
         </button>
         <button class="nav-item" data-tab="mente" data-route="mente">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20c-2.6-2.1-3.8-5-3.8-8.2 0-3 1.3-5.6 3.8-7.8 2.5 2.2 3.8 4.8 3.8 7.8 0 3.2-1.2 6.1-3.8 8.2Z"/><path d="M12 20c-4.2 0-7.8-2.3-9-6.6 2.7-.3 5 .5 6.8 2.2"/><path d="M12 20c4.2 0 7.8-2.3 9-6.6-2.7-.3-5 .5-6.8 2.2"/></svg>
           <span>Mente</span>
         </button>
         <button class="nav-item" data-tab="coach" data-route="coach">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3v-7a4 4 0 0 1-1-2.6V7a4 4 0 0 1 4-4h11a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 14.5a3.5 3.5 0 0 1-3.5 3.5H9l-5 3.5V7.5A3.5 3.5 0 0 1 7.5 4h10A3.5 3.5 0 0 1 21 7.5Z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg>
           <span>Coach</span>
         </button>
       </nav>
@@ -994,11 +996,11 @@
 
     <!-- ===== BOTTOM NAV (Mobile) ===== -->
     <nav class="bottom-nav" id="bottom-nav" aria-label="Navegación principal">
-      <button class="bottom-nav-item active" data-tab="hoy" data-route="hoy"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>Hoy</span></button>
-      <button class="bottom-nav-item" data-tab="metas" data-route="metas"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg><span>Metas</span></button>
-      <button class="bottom-nav-item" data-tab="semana" data-route="semana"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 20V10M12 20V4M19 20v-7"/></svg><span>Semana</span></button>
-      <button class="bottom-nav-item" data-tab="mente" data-route="mente"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span>Mente</span></button>
-      <button class="bottom-nav-item" data-tab="coach" data-route="coach"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3v-7a4 4 0 0 1-1-2.6V7a4 4 0 0 1 4-4h11a4 4 0 0 1 4 4z"/></svg><span>Coach</span></button>
+      <button class="bottom-nav-item active" data-tab="hoy" data-route="hoy"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v2M5.6 6.6l1.4 1.4M18.4 6.6 17 8M3 17h18M7 17a5 5 0 0 1 10 0M6 21h12"/></svg><span>Hoy</span></button>
+      <button class="bottom-nav-item" data-tab="metas" data-route="metas"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20 9.5 8.5l3.8 6.2 2.2-3.2L21 20Z"/><path d="m8 11 1.5-2.5L11 11"/></svg><span>Metas</span></button>
+      <button class="bottom-nav-item" data-tab="semana" data-route="semana"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.6 6.6 0 0 0 10.7 10.7Z"/></svg><span>Semana</span></button>
+      <button class="bottom-nav-item" data-tab="mente" data-route="mente"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20c-2.6-2.1-3.8-5-3.8-8.2 0-3 1.3-5.6 3.8-7.8 2.5 2.2 3.8 4.8 3.8 7.8 0 3.2-1.2 6.1-3.8 8.2Z"/><path d="M12 20c-4.2 0-7.8-2.3-9-6.6 2.7-.3 5 .5 6.8 2.2"/><path d="M12 20c4.2 0 7.8-2.3 9-6.6-2.7-.3-5 .5-6.8 2.2"/></svg><span>Mente</span></button>
+      <button class="bottom-nav-item" data-tab="coach" data-route="coach"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 14.5a3.5 3.5 0 0 1-3.5 3.5H9l-5 3.5V7.5A3.5 3.5 0 0 1 7.5 4h10A3.5 3.5 0 0 1 21 7.5Z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg><span>Coach</span></button>
     </nav>
 
     <button class="coach-fab" id="coach-fab" aria-label="Abrir Coach" title="Hablar con el Coach" hidden>
@@ -1102,6 +1104,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=43"></script>
+  <script type="module" src="js/app.js?v=44"></script>
 </body>
 </html>
