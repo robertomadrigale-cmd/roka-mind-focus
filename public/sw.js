@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v36-daily-rituals';
+const CACHE_NAME = 'roka-mind-v37-product-system';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;
@@ -9,6 +9,7 @@ const urlsToCache = [
   '/js/app.js',
   '/js/lib/dates.js',
   '/js/lib/persistence.js',
+  '/js/lib/system.js',
   '/js/components/Timer.js',
   '/js/components/LifeWheel.js',
   '/js/services/aiGateway.js',

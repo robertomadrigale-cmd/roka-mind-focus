@@ -5,6 +5,7 @@ import { Timer } from "./components/Timer.js";
 import { LifeWheel, LIFE_WHEEL_AXES } from "./components/LifeWheel.js";
 import { localDateKey } from "./lib/dates.js";
 import { choosePersistedState, hasMeaningfulUserData, jsonSizeBytes, pruneStateForCloud, selectLocalCandidateForUser } from "./lib/persistence.js";
+import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, migrateState as migrateSystemState, overdueTasks, ritualAdherence, shouldPromptWeeklyReview, weekKey, weekStats } from "./lib/system.js";
 import { callAIGateway } from "./services/aiGateway.js?v=10.8";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
 
@@ -33,7 +34,7 @@ let selectedCalendarDate = todayStr();
 
 // ─── DEFAULT STATE ───
 const DEFAULT_STATE = {
-  stateVersion: 3,
+  stateVersion: 4,
   updatedAt: '',
   pendingCloudSync: false,
   beliefs: [], mantras: [], victories: [], prideLogs: [], gratitudeLogs: [],
@@ -57,12 +58,16 @@ const DEFAULT_STATE = {
   annualBig5: ['','','','',''], values5: ['','','','',''], mustBecome5: ['','','','',''],
   quarterly10: ['','','','','','','','','',''],
   weeklyReflection: { well:'', adjust:'' },
+  weeklyReviews: [],
+  weekFocus: { weekKey: '', goalIds: [] },
+  settings: { advancedTools: false },
   learning: { book:'', course:'', conference:'', mastermind:'' },
   visionText: '',
   sectionDates: { weekly:'', learning:'', stopDoing:'', quarterly:'', annual:'' },
   dailyTasks: {},
   stopDoingList: ['','','','','','','','','',''],
   activityLog: {},
+  focusLog: {},
   hasSeenOnboarding: false,
   onboarding: { status: 'not_started', completedAt: '', step: 0 }
 };
@@ -112,6 +117,7 @@ function deepMerge(t, s) {
 }
 
 function normalizeState() {
+  state = migrateSystemState(state);
   state.stateVersion = Number(state.stateVersion || 1);
   if (!state.updatedAt) state.updatedAt = '';
   if (!state.gratitudeLogs) state.gratitudeLogs = [];
@@ -135,12 +141,23 @@ function normalizeState() {
   delete state.aiConfig.model;
   state.coachPreferences = deepMerge(DEFAULT_STATE.coachPreferences, state.coachPreferences || {});
   state.onboarding = deepMerge(DEFAULT_STATE.onboarding, state.onboarding || {});
+  state.settings = deepMerge(DEFAULT_STATE.settings, state.settings || {});
+  if (!state.weeklyReviews) state.weeklyReviews = [];
+  if (!state.weekFocus) state.weekFocus = { weekKey: weekKey(), goalIds: [] };
+  if (!state.weekFocus.weekKey) state.weekFocus.weekKey = weekKey();
+  if (!Array.isArray(state.weekFocus.goalIds)) state.weekFocus.goalIds = [];
   if (state.hasSeenOnboarding && state.onboarding.status === 'not_started') state.onboarding.status = 'completed';
   state.smartGoals = state.smartGoals.map(goal => ({
     progress: 0,
     nextStep: '',
+    status: goal.completed ? 'done' : 'active',
+    big5Index: null,
+    lifeArea: '',
+    progressHistory: [],
+    createdAt: goal.startDate || '',
     ...goal,
-    progress: Math.min(100, Math.max(0, Number(goal.progress || 0)))
+    progress: Math.min(100, Math.max(0, Number(goal.progress || 0))),
+    status: goal.status || (goal.completed ? 'done' : 'active')
   }));
   state.stateVersion = DEFAULT_STATE.stateVersion;
   if (currentUser) state.ownerUid = currentUser.uid;
@@ -355,8 +372,32 @@ function showSaveStatus(status, message = '') {
 }
 function logActivity(date) { if(!state.activityLog) state.activityLog={}; state.activityLog[date]=(state.activityLog[date]||0)+1; saveState(); }
 
+function getGoalTitle(goalId) {
+  const goal = (state.smartGoals || []).find(item => item.id === goalId);
+  return goal?.goal || '';
+}
+
+function getLifeAreaLabel(key) {
+  return LIFE_WHEEL_AXES.find(axis => axis.key === key)?.label || key || '';
+}
+
+function activeGoals() {
+  return (state.smartGoals || []).filter(goal => goal.status !== 'done' && goal.status !== 'paused' && goal.completed !== true);
+}
+
+function recordGoalProgress(goal, progress) {
+  const value = Math.min(100, Math.max(0, Number(progress || 0)));
+  if (Number(goal.progress || 0) !== value) {
+    if (!goal.progressHistory) goal.progressHistory = [];
+    goal.progressHistory.push({ date: todayStr(), progress: value });
+  }
+  goal.progress = value;
+  goal.completed = value >= 100;
+  goal.status = value >= 100 ? 'done' : (goal.status === 'done' ? 'active' : goal.status || 'active');
+}
+
 function updateAccountSyncStatus(status = 'idle') {
-  const el = $('#account-sync-status');
+  const el = document.querySelector('#account-sync-status');
   if (!el) return;
   if (!currentUser) {
     el.textContent = 'Sin sesión';
@@ -454,7 +495,7 @@ function initAuth() {
       if (avatar) avatar.textContent = (user.displayName || user.email || 'R').trim().charAt(0).toUpperCase();
       updateAccountSyncStatus('saving');
       
-      if(!$('#account-sync-status')) {
+      if(!document.querySelector('#account-sync-status')) {
         const sync = document.createElement('div');
         sync.id = 'account-sync-status';
         sync.className = 'account-sync-status';
@@ -462,7 +503,7 @@ function initAuth() {
         $('.header-right').prepend(sync);
       }
 
-      if(!$('#logout-btn')) {
+      if(!document.querySelector('#logout-btn')) {
         const btn = document.createElement('button');
         btn.id = 'logout-btn';
         btn.className = 'zen-btn zen-btn-ghost';
@@ -497,8 +538,8 @@ function initAuth() {
       lastAuthUid = '';
       $('#auth-overlay').style.display = 'flex';
       $('#app').style.display = 'none';
-      if($('#logout-btn')) $('#logout-btn').remove();
-      if($('#account-sync-status')) $('#account-sync-status').remove();
+      if(document.querySelector('#logout-btn')) document.querySelector('#logout-btn').remove();
+      if(document.querySelector('#account-sync-status')) document.querySelector('#account-sync-status').remove();
     }
   });
 
@@ -586,7 +627,7 @@ function addXP(amount, reason) {
   checkBadges();
   saveState();
   updateXPDisplay();
-  if ($('#tab-profile') && $('#tab-profile').classList.contains('active')) renderProfile();
+  if ($('#tab-identity') && $('#tab-identity').classList.contains('active')) renderProfile();
 }
 
 function updateXPDisplay() {
@@ -622,14 +663,14 @@ function unlockBadge(id) {
 // ─── TAB NAVIGATION ───
 const ROUTES = {
   hoy: { section: 'daily', label: 'Hoy' },
-  coach: { section: 'coach', label: 'Coach' },
-  mente: { section: 'mindset', label: 'Mente' },
   metas: { section: 'strategy', label: 'Metas' },
-  progreso: { section: 'reflection', label: 'Progreso' },
+  semana: { section: 'reflection', label: 'Semana' },
+  mente: { section: 'mindset', label: 'Mente' },
+  coach: { section: 'coach', label: 'Coach' },
   perfil: { section: 'identity', label: 'Perfil' }
 };
-const ROUTE_ALIASES = { today: 'hoy', daily: 'hoy', ai: 'coach', mindset: 'mente', strategy: 'metas', reflection: 'progreso', identity: 'perfil', profile: 'perfil' };
-const ROUTE_ORDER = ['hoy', 'coach', 'mente', 'metas', 'progreso', 'perfil'];
+const ROUTE_ALIASES = { today: 'hoy', daily: 'hoy', ai: 'coach', mindset: 'mente', strategy: 'metas', progreso: 'semana', reflection: 'semana', identity: 'perfil', profile: 'perfil' };
+const ROUTE_ORDER = ['hoy', 'metas', 'semana', 'mente', 'coach'];
 let activeRoute = 'hoy';
 let coachOriginRoute = 'hoy';
 
@@ -646,12 +687,12 @@ function activateHashSubroute(route) {
     showCoachView(subroute === 'informes' ? 'reports' : 'chat', false);
   }
   if (route === 'metas' && subroute) {
-    const map = { activas: 'strat-monthly', trimestre: 'strat-quarterly', vision: 'strat-vision' };
-    document.querySelector(`.strat-sub-tab[data-target="${map[subroute] || map.activas}"]`)?.click();
+    const map = { trimestre: 'strat-quarterly', anio: 'strat-year', vision: 'strat-vision', habitos: 'strat-habits' };
+    activateSubtab('metas', map[subroute] || map.trimestre, false);
   }
-  if (route === 'progreso' && subroute) {
-    const map = { resumen: 'reflection-progress', semana: 'reflection-weekly', calendario: 'reflection-calendar' };
-    document.querySelector(`.reflection-sub-tab[data-target="${map[subroute] || map.resumen}"]`)?.click();
+  if (route === 'semana' && subroute) {
+    const map = { revision: 'reflection-weekly', calendario: 'reflection-calendar', resumen: 'reflection-progress', semana: 'reflection-weekly' };
+    activateSubtab('semana', map[subroute] || map.revision, false);
   }
 }
 
@@ -688,40 +729,29 @@ function initTabs() {
   $('#profile-avatar-btn')?.addEventListener('click', () => switchTab('perfil', { focus: true }));
   window.addEventListener('hashchange', () => switchTab(routeFromHash(), { updateHash: false }));
 
-  $$('.strat-sub-tab').forEach(b => {
-    b.addEventListener('click', () => {
-      $$('.strat-sub-tab').forEach(x => { x.classList.remove('active'); x.style.color = 'var(--text-secondary)'; x.style.fontWeight = 'normal'; });
-      $$('.strat-content').forEach(c => { c.classList.remove('active'); c.style.display = 'none'; });
-      b.classList.add('active');
-      b.style.color = 'var(--accent-gold)';
-      b.style.fontWeight = 'bold';
-      const target = b.dataset.target;
-      const tc = $(`#${target}`);
-      if (tc) {
-        tc.classList.add('active');
-        tc.style.display = 'block';
-      }
-      setRouteHash('metas', b.dataset.subroute || (target === 'strat-quarterly' ? 'trimestre' : target === 'strat-vision' ? 'vision' : 'activas'));
-    });
+  $$('[data-subtab-group][data-subtab-target]').forEach(button => {
+    button.addEventListener('click', () => activateSubtab(button.dataset.subtabGroup, button.dataset.subtabTarget, true));
   });
+}
 
-  $$('.reflection-sub-tab').forEach(b => {
-    b.addEventListener('click', () => {
-      $$('.reflection-sub-tab').forEach(x => { x.classList.remove('active'); x.style.color = 'var(--text-secondary)'; x.style.fontWeight = 'normal'; });
-      $$('.reflection-sub-content').forEach(c => { c.classList.remove('active'); c.style.display = 'none'; });
-      b.classList.add('active');
-      b.style.color = 'var(--accent-gold)';
-      b.style.fontWeight = 'bold';
-      const target = b.dataset.target;
-      const tc = $(`#${target}`);
-      if (tc) {
-        tc.classList.add('active');
-        tc.style.display = 'block';
-      }
-      const subroute = target === 'reflection-weekly' ? 'semana' : target === 'reflection-calendar' ? 'calendario' : 'resumen';
-      setRouteHash('progreso', subroute);
-    });
+function activateSubtab(group, target, updateHash = true) {
+  const buttons = $$(`[data-subtab-group="${group}"]`);
+  buttons.forEach(button => {
+    const active = button.dataset.subtabTarget === target;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+    button.style.color = active ? 'var(--accent-gold)' : 'var(--text-secondary)';
+    button.style.fontWeight = active ? 'bold' : 'normal';
   });
+  $$(`[data-subtab-content="${group}"]`).forEach(content => {
+    const active = content.id === target;
+    content.classList.toggle('active', active);
+    content.style.display = active ? 'block' : 'none';
+  });
+  if (updateHash) {
+    const activeButton = Array.from(buttons).find(button => button.dataset.subtabTarget === target);
+    setRouteHash(group, activeButton?.dataset.subroute || '');
+  }
 }
 
 function updateClarityPanel() {
@@ -757,8 +787,19 @@ function switchTab(t, options = {}) {
   const section = $(`#tab-${config.section}`);
   if (section) section.classList.add('active');
   document.title = `${config.label} — ROKA Mind Focus`;
-  if (options.updateHash !== false) setRouteHash(route, '', options.replace === true);
-  else activateHashSubroute(route);
+  // Las vistas calculadas (estadísticas, pasos de metas) se refrescan al entrar para no mostrar datos viejos.
+  if (appInitialized) {
+    if (route === 'hoy') safeInit(renderTodaySystem, 'renderTodaySystem');
+    if (route === 'semana') {
+      safeInit(renderWeeklyReviewWizard, 'renderWeeklyReviewWizard');
+      safeInit(renderWeeklyReviewTrend, 'renderWeeklyReviewTrend');
+      safeInit(renderCalendar, 'renderCalendar');
+    }
+  }
+  if (options.updateHash !== false) {
+    setRouteHash(route, '', options.replace === true);
+    activateHashSubroute(route);
+  } else activateHashSubroute(route);
   window.scrollTo({ top: 0 });
   if (options.focus) {
     const heading = section?.querySelector('h1');
@@ -824,7 +865,10 @@ function initTimer() {
     $,
     $$,
     onComplete: () => {
-      logActivity(todayStr());
+      const today = todayStr();
+      if (!state.focusLog) state.focusLog = {};
+      state.focusLog[today] = (state.focusLog[today] || 0) + 1;
+      logActivity(today);
       if(!state.gamification.badges.includes('focus_master')) unlockBadge('focus_master');
       addXP(50, 'Sesión de Foco');
     }
@@ -927,7 +971,7 @@ function renderBeliefsLibrary() {
     saveState();
     renderBeliefsLibrary();
     renderMantras();
-    if ($('#tab-progress') && $('#tab-progress').classList.contains('active')) renderProgress();
+    if ($('#tab-reflection') && $('#tab-reflection').classList.contains('active')) renderProgress();
   }));
 }
 function initMantraSlide() {
@@ -1230,11 +1274,101 @@ function renderPlanner() {
   const sorted=[...tasks].sort((a,b)=>(a.completed?1:0)-(b.completed?1:0)||(prOrder[a.priority]||1)-(prOrder[b.priority]||1));
   c.innerHTML=sorted.map(t=>{
     const prLabels={high:'Alta',medium:'Media',low:'Baja'};
-    return `<div class="planner-task ${t.completed?'completed':''}"><button class="task-check ${t.completed?'done':''}" data-tid="${t.id}"></button><span class="task-text">${esc(t.text)}</span><span class="task-priority-tag ${t.priority}">${prLabels[t.priority]}</span><button class="btn-delete" data-del-task="${t.id}" style="opacity:0.5;">✕</button></div>`;
+    const goalLabel = t.goalId ? getGoalTitle(t.goalId) : '';
+    return `<div class="planner-task ${t.completed?'completed':''}"><button class="task-check ${t.completed?'done':''}" data-tid="${esc(t.id)}"></button><span class="task-text">${esc(t.text)}</span>${goalLabel?`<span class="task-goal-tag">${esc(goalLabel.slice(0,32))}</span>`:''}<span class="task-priority-tag ${t.priority}">${prLabels[t.priority]}</span><button class="btn-delete" data-del-task="${esc(t.id)}" style="opacity:0.5;">✕</button>${t.needsGoalFollowUp?`<div class="goal-followup-form"><input class="zen-input" data-follow-step="${esc(t.id)}" placeholder="Siguiente paso"><input class="zen-input" type="number" min="0" max="100" data-follow-progress="${esc(t.id)}" placeholder="Avance %"><button class="zen-btn zen-btn-primary" data-save-followup="${esc(t.id)}">Guardar</button></div>`:''}</div>`;
   }).join('');
-  c.querySelectorAll('.task-check').forEach(b=>b.addEventListener('click',()=>{const tk=tasks.find(t=>t.id===b.dataset.tid);if(tk){tk.completed=!tk.completed;saveState();renderPlanner();}}));
+  c.querySelectorAll('.task-check').forEach(b=>b.addEventListener('click',()=>{const tk=tasks.find(t=>t.id===b.dataset.tid);if(tk){if(!tk.completed){state=completeTaskEffects(state,today,tk.id);}else{tk.completed=false;delete tk.completedAt;delete tk.needsGoalFollowUp;}saveState();renderPlanner();renderTodaySystem();renderSmartGoals();}}));
   c.querySelectorAll('[data-del-task]').forEach(b=>b.addEventListener('click',()=>{state.dailyTasks[today]=tasks.filter(t=>t.id!==b.dataset.delTask);saveState();renderPlanner();}));
+  c.querySelectorAll('[data-save-followup]').forEach(b=>b.addEventListener('click',()=>saveGoalFollowup(b.dataset.saveFollowup)));
   updatePlannerProgress(tasks);
+}
+
+function saveGoalFollowup(taskId) {
+  const task = (state.dailyTasks[todayStr()] || []).find(item => item.id === taskId);
+  const goal = task?.goalId ? state.smartGoals.find(item => item.id === task.goalId) : null;
+  if (!goal) return;
+  const step = $(`[data-follow-step="${CSS.escape(taskId)}"]`)?.value.trim();
+  const progress = $(`[data-follow-progress="${CSS.escape(taskId)}"]`)?.value;
+  if (step) goal.nextStep = step;
+  if (progress !== '') recordGoalProgress(goal, progress);
+  delete task.needsGoalFollowUp;
+  saveState(); renderPlanner(); renderTodaySystem(); renderSmartGoals(); renderProgress(); showToast('Meta actualizada');
+}
+
+function renderTodaySystem() {
+  renderWeeklyPrompt();
+  renderOverdueTasksCard();
+  renderGoalNextStepsCard();
+  renderLowLifeAreasCard();
+}
+
+function renderWeeklyPrompt() {
+  const c = $('#weekly-review-prompt');
+  if (!c) return;
+  if (!shouldPromptWeeklyReview(state, todayStr())) { c.innerHTML = ''; return; }
+  c.innerHTML = `<div class="glass-card today-alert-card"><div><span class="page-eyebrow">Revisión semanal</span><h2>Cierra tu semana en 10 minutos</h2><p>Revisa qué funcionó, ajusta metas y elige hasta 3 focos para la próxima semana.</p></div><button class="zen-btn zen-btn-primary" id="start-weekly-review-btn">Empezar revisión</button></div>`;
+  c.querySelector('#start-weekly-review-btn')?.addEventListener('click', () => { switchTab('semana', { focus: true }); activateSubtab('semana', 'reflection-weekly', true); });
+}
+
+function renderOverdueTasksCard() {
+  const c = $('#overdue-tasks-card');
+  if (!c) return;
+  const tasks = overdueTasks(state, todayStr(), 14);
+  if (!tasks.length) { c.innerHTML = ''; return; }
+  c.innerHTML = `<div class="glass-card today-alert-card"><div><span class="page-eyebrow">Pendientes</span><h2>${tasks.length === 1 ? 'Tienes 1 pendiente de días anteriores' : `Tienes ${tasks.length} pendientes de días anteriores`}</h2><p>${tasks.slice(0, 3).map(task => `${esc(task.text)} (${esc(fmtDate(task.date + 'T00:00:00'))})`).join(' · ')}</p></div><div class="today-card-actions"><button class="zen-btn zen-btn-primary" id="carry-over-tasks-btn">Pasar a hoy</button><button class="zen-btn zen-btn-ghost" id="discard-overdue-tasks-btn">Descartar</button></div></div>`;
+  c.querySelector('#carry-over-tasks-btn')?.addEventListener('click', () => {
+    state = carryOverTasks(state, todayStr(), tasks.map(task => task.id));
+    saveState(); renderPlanner(); renderTodaySystem(); showToast('Pendientes movidos a hoy');
+  });
+  c.querySelector('#discard-overdue-tasks-btn')?.addEventListener('click', () => {
+    tasks.forEach(task => { state.dailyTasks[task.date] = (state.dailyTasks[task.date] || []).filter(item => item.id !== task.id); });
+    saveState(); renderTodaySystem(); renderCalendar(); showToast('Pendientes descartados');
+  });
+}
+
+function renderGoalNextStepsCard() {
+  const c = $('#goal-next-steps-card');
+  if (!c) return;
+  const steps = goalNextSteps(state, todayStr());
+  if (!steps.length) {
+    c.innerHTML = '<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange">M</div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><p class="card-subtitle">Crea una meta activa para convertirla en tareas de hoy.</p></div>';
+    return;
+  }
+  c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange">M</div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><div class="goal-next-list">${steps.map(item => item.nextStep ? `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>${esc(item.nextStep)}</p></div>${item.plannedToday ? '<span class="cal-status-pill">En tu plan de hoy</span>' : `<button class="zen-btn zen-btn-primary" data-goal-today="${esc(item.id)}">Hacer hoy</button>`}</div>` : `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>Define el siguiente paso para desbloquear Hoy.</p><input class="zen-input" data-next-inline="${esc(item.id)}" placeholder="Siguiente paso de esta meta"></div><button class="zen-btn zen-btn-ghost" data-save-next-inline="${esc(item.id)}">Guardar</button></div>`).join('')}</div></div>`;
+  c.querySelectorAll('[data-goal-today]').forEach(button => button.addEventListener('click', () => addGoalStepTask(button.dataset.goalToday)));
+  c.querySelectorAll('[data-save-next-inline]').forEach(button => button.addEventListener('click', () => {
+    const goal = state.smartGoals.find(item => item.id === button.dataset.saveNextInline);
+    const input = c.querySelector(`[data-next-inline="${CSS.escape(button.dataset.saveNextInline)}"]`);
+    if (goal && input?.value.trim()) {
+      goal.nextStep = input.value.trim();
+      saveState(); renderTodaySystem(); renderSmartGoals(); showToast('Siguiente paso guardado');
+    }
+  }));
+}
+
+function renderLowLifeAreasCard() {
+  const c = $('#low-life-areas-card');
+  if (!c) return;
+  const areas = lowLifeAreas(state, 4);
+  if (!areas.length) { c.innerHTML = ''; return; }
+  c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon green">○</div><h2 class="card-title">Áreas bajas de la Rueda</h2></div></div><div class="low-area-list">${areas.slice(0, 4).map(area => `<div class="low-area-item"><div><strong>${esc(getLifeAreaLabel(area.key))}</strong><span>${area.value}/10</span></div><button class="zen-btn zen-btn-primary" data-life-goal="${esc(area.key)}">Crear meta</button><button class="zen-btn zen-btn-ghost" data-life-ritual="${esc(area.key)}">Crear ritual</button></div>`).join('')}</div></div>`;
+  c.querySelectorAll('[data-life-goal]').forEach(button => button.addEventListener('click', () => openSmartForm({ lifeArea: button.dataset.lifeGoal })));
+  c.querySelectorAll('[data-life-ritual]').forEach(button => button.addEventListener('click', () => {
+    switchTab('metas', { focus: true });
+    activateSubtab('metas', 'strat-habits', true);
+    $('#ritual-input')?.focus();
+    $('#ritual-life-area') && ($('#ritual-life-area').value = button.dataset.lifeRitual);
+  }));
+}
+
+function addGoalStepTask(goalId) {
+  const goal = state.smartGoals.find(item => item.id === goalId);
+  if (!goal?.nextStep) return;
+  const today = todayStr();
+  if (!state.dailyTasks[today]) state.dailyTasks[today] = [];
+  if (state.dailyTasks[today].some(task => task.goalId === goalId && task.text === goal.nextStep)) { showToast('Ese paso ya está en tu plan de hoy'); return; }
+  state.dailyTasks[today].push({ id: gid(), text: goal.nextStep, priority: 'high', completed: false, goalId });
+  saveState(); renderPlanner(); renderTodaySystem(); showToast('Siguiente paso agregado a Hoy');
 }
 function updatePlannerProgress(tasks) {
   const total=tasks.length, done=tasks.filter(t=>t.completed).length;
@@ -1246,12 +1380,20 @@ function updatePlannerProgress(tasks) {
 // ─── DAILY RITUALS QUICK ───
 function renderDailyRitualsQuick() {
   const c=$('#daily-rituals-quick'); if(!c)return;
+  renderRitualSelectors();
   if(!state.rituals.length){c.innerHTML='<div class="empty-state" style="padding:20px;"><div class="empty-state-text" style="font-size:0.8rem;">Escribe arriba tu primer ritual diario. Para elegir días específicos usa "Editar días".</div></div>';return;}
   const date = todayStr();
   const scheduled = state.rituals.filter(r => isRitualScheduled(r, date));
   const list = scheduled.length ? scheduled : state.rituals;
   c.innerHTML=(scheduled.length?'':'<div class="calendar-save-hint">No hay rituales programados para hoy; mostrando todos.</div>') + list.map(r=>{const done=isRitualCompleted(r,date); return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);"><button class="ritual-check ${done?'completed':''}" data-rid="${r.id}"></button><span style="font-size:0.85rem;${done?'text-decoration:line-through;color:var(--text-muted);':''}">${esc(r.name)}</span></div>`;}).join('');
-  c.querySelectorAll('.ritual-check').forEach(b=>b.addEventListener('click',()=>{const r=state.rituals.find(x=>x.id===b.dataset.rid);if(r){setRitualCompleted(r,date,!isRitualCompleted(r,date));saveState();renderDailyRitualsQuick();renderRituals();if($('#tab-calendar')&&$('#tab-calendar').classList.contains('active'))renderCalendar();calcStreak();}}));
+  c.querySelectorAll('.ritual-check').forEach(b=>b.addEventListener('click',()=>{const r=state.rituals.find(x=>x.id===b.dataset.rid);if(r){setRitualCompleted(r,date,!isRitualCompleted(r,date));saveState();renderDailyRitualsQuick();renderRituals();if($('#tab-reflection')&&$('#tab-reflection').classList.contains('active'))renderCalendar();calcStreak();}}));
+}
+
+function renderRitualSelectors() {
+  const goalOptions = '<option value="">Sin meta</option>' + activeGoals().map(goal => `<option value="${esc(goal.id)}">${esc(goal.goal)}</option>`).join('');
+  ['#daily-ritual-goal', '#ritual-goal'].forEach(selector => { const el = $(selector); if (el) el.innerHTML = goalOptions; });
+  const area = $('#ritual-life-area');
+  if (area) area.innerHTML = '<option value="">Sin área</option>' + LIFE_WHEEL_AXES.map(axis => `<option value="${esc(axis.key)}">${esc(axis.label)}</option>`).join('');
 }
 
 // ─── RITUALS (Weekly) ───
@@ -1260,10 +1402,10 @@ function initRituals() {
   $('#ritual-input').addEventListener('keydown',e=>{if(e.key==='Enter')addRitual('#ritual-input',false);});
   $('#add-daily-ritual-btn')?.addEventListener('click',()=>addRitual('#daily-ritual-input',true));
   $('#daily-ritual-input')?.addEventListener('keydown',e=>{if(e.key==='Enter')addRitual('#daily-ritual-input',true);});
-  $('#edit-ritual-days-btn')?.addEventListener('click',()=>{switchTab('progreso',{focus:true});document.querySelector('.reflection-sub-tab[data-target="reflection-weekly"]')?.click();});
+  $('#edit-ritual-days-btn')?.addEventListener('click',()=>{switchTab('metas',{focus:true});activateSubtab('metas','strat-habits',true);});
 }
 // Desde "Hoy" el ritual se crea programado todos los días; desde "Semanal" se eligen los días en la tabla.
-function addRitual(inputSelector='#ritual-input', everyDay=false) { const i=$(inputSelector),n=i?.value.trim(); if(!n)return; if(state.rituals.length>=10){showToast('Máximo 10 rituales');return;} state.rituals.push({id:gid(),name:n,days:{lun:everyDay,mar:everyDay,mie:everyDay,jue:everyDay,vie:everyDay,sab:everyDay,dom:everyDay}}); saveState();i.value='';renderRituals();renderDailyRitualsQuick();showToast(everyDay?'Ritual diario agregado':'Ritual agregado'); }
+function addRitual(inputSelector='#ritual-input', everyDay=false) { const i=$(inputSelector),n=i?.value.trim(); if(!n)return; if(state.rituals.length>=10){showToast('Máximo 10 rituales');return;} const goalId=(everyDay?$('#daily-ritual-goal'):$('#ritual-goal'))?.value||''; const lifeArea=$('#ritual-life-area')?.value||''; state.rituals.push({id:gid(),name:n,goalId,lifeArea,createdAt:new Date().toISOString(),days:{lun:everyDay,mar:everyDay,mie:everyDay,jue:everyDay,vie:everyDay,sab:everyDay,dom:everyDay},completions:{}}); saveState();i.value='';renderRituals();renderDailyRitualsQuick();renderSmartGoals();showToast(everyDay?'Ritual diario agregado':'Ritual agregado'); }
 function renderRituals() {
   const c=$('#rituals-container'); if(!c)return;
   if(!state.rituals.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon">巡</div><div class="empty-state-text">Agrega tu primer ritual</div></div>';return;}
@@ -1271,7 +1413,7 @@ function renderRituals() {
   let h=`<table class="rituals-grid"><thead><tr><th style="text-align:left;padding-left:12px;">Ritual</th>${dl.map(d=>`<th>${d}</th>`).join('')}<th></th></tr></thead><tbody>`;
   state.rituals.forEach(r=>{h+=`<tr><td class="ritual-name">${esc(r.name)}</td>${dk.map(d=>{const scheduled=r.days&&r.days[d]===true;return`<td><button class="ritual-check ${scheduled?'completed':''}" title="Programar este ritual" data-rid="${r.id}" data-day="${d}"></button></td>`;}).join('')}<td><button class="btn-delete" data-del-rit="${r.id}" style="opacity:0.5;">✕</button></td></tr>`;});
   h+='</tbody></table>'; c.innerHTML=h;
-  c.querySelectorAll('.ritual-check').forEach(b=>b.addEventListener('click',()=>{const r=state.rituals.find(x=>x.id===b.dataset.rid);if(r){if(!r.days)r.days={};r.days[b.dataset.day]=r.days[b.dataset.day]===true?false:true;saveState();renderRituals();renderDailyRitualsQuick();if($('#tab-calendar')&&$('#tab-calendar').classList.contains('active'))renderCalendar();showToast('Rutina semanal guardada');}}));
+  c.querySelectorAll('.ritual-check').forEach(b=>b.addEventListener('click',()=>{const r=state.rituals.find(x=>x.id===b.dataset.rid);if(r){if(!r.days)r.days={};r.days[b.dataset.day]=r.days[b.dataset.day]===true?false:true;saveState();renderRituals();renderDailyRitualsQuick();if($('#tab-reflection')&&$('#tab-reflection').classList.contains('active'))renderCalendar();showToast('Rutina semanal guardada');}}));
   c.querySelectorAll('[data-del-rit]').forEach(b=>b.addEventListener('click',()=>{state.rituals=state.rituals.filter(r=>r.id!==b.dataset.delRit);saveState();renderRituals();renderDailyRitualsQuick();}));
 }
 function initWeeklyReflection() {
@@ -1287,10 +1429,10 @@ function initWeeklyReflection() {
       try {
         const prompt = `Reflexión semanal del usuario:\nSalió bien: ${w}\nAjustará: ${a}\nComo su coach de alto rendimiento, dale un feedback directo, desafiante y empoderador (máximo 2 párrafos).`;
         const result = await callAI(prompt, 'Eres un coach estricto pero empático que exige la excelencia.');
-        let feedbackBox = $('#ai-weekly-feedback');
+        let feedbackBox = $('#ai-weekly-btn')?.parentNode?.querySelector('[data-ai-weekly-feedback]');
         if(!feedbackBox) {
           feedbackBox = document.createElement('div');
-          feedbackBox.id = 'ai-weekly-feedback';
+          feedbackBox.dataset.aiWeeklyFeedback = 'true';
           feedbackBox.style.cssText = 'margin-top: 16px; padding: 16px; background: rgba(74, 127, 181, 0.1); border-left: 3px solid var(--accent-blue); border-radius: var(--radius-sm); font-size: 0.9rem; color: var(--text-primary); white-space: pre-wrap; line-height: 1.5;';
           $('#ai-weekly-btn').parentNode.appendChild(feedbackBox);
         }
@@ -1307,17 +1449,86 @@ function saveWeeklyReflection() {
   const w=$('#weekly-well'),a=$('#weekly-adjust');
   if(w) state.weeklyReflection.well=w.value;
   if(a) state.weeklyReflection.adjust=a.value;
+  const goalUpdates = [];
+  $$('[data-week-goal-progress]').forEach(input => {
+    const goal = state.smartGoals.find(item => item.id === input.dataset.weekGoalProgress);
+    if (!goal) return;
+    const from = Number(goal.progress || 0);
+    const to = Number(input.value || 0);
+    recordGoalProgress(goal, to);
+    const step = $(`[data-week-goal-step="${CSS.escape(goal.id)}"]`)?.value.trim();
+    if (step !== undefined) goal.nextStep = step;
+    const status = $(`[data-week-goal-status="${CSS.escape(goal.id)}"]`)?.value;
+    if (status) { goal.status = status; goal.completed = status === 'done' || Number(goal.progress || 0) >= 100; }
+    goalUpdates.push({ goalId: goal.id, from, to, nextStep: goal.nextStep || '' });
+  });
+  const focusGoalIds = Array.from($$('[data-week-focus-goal]')).filter(input => input.checked).slice(0, 3).map(input => input.dataset.weekFocusGoal);
+  state.weekFocus = { weekKey: weekKey(todayStr()), goalIds: focusGoalIds };
+  $$('[data-week-ritual-keep]').forEach(input => {
+    if (!input.checked) state.rituals = state.rituals.filter(ritual => ritual.id !== input.dataset.weekRitualKeep);
+  });
+  if (!state.weeklyReviews) state.weeklyReviews = [];
+  const currentWeek = weekKey(todayStr());
+  const review = {
+    id: gid(),
+    weekKey: currentWeek,
+    createdAt: new Date().toISOString(),
+    stats: weekStats(state, currentWeek, todayStr()),
+    well: state.weeklyReflection.well || '',
+    adjust: state.weeklyReflection.adjust || '',
+    goalUpdates,
+    focusGoalIds,
+    lifeWheel: JSON.parse(JSON.stringify(state.lifeWheel || {}))
+  };
+  state.weeklyReviews = [...state.weeklyReviews.filter(item => item.weekKey !== currentWeek), review].slice(-104);
   state.sectionDates.weekly = todayStr();
   saveState();
   logActivity(todayStr());
   showToast('Revisión semanal guardada');
-  if($('#tab-calendar')&&$('#tab-calendar').classList.contains('active'))renderCalendar();
+  renderWeeklyReviewWizard(); renderSmartGoals(); renderDailyRitualsQuick(); renderRituals();
+  if($('#tab-reflection')&&$('#tab-reflection').classList.contains('active'))renderCalendar();
 }
 
 function renderWeeklyReflection() {
   const w=$('#weekly-well'),a=$('#weekly-adjust');
   if(w && document.activeElement !== w) w.value=state.weeklyReflection.well||'';
   if(a && document.activeElement !== a) a.value=state.weeklyReflection.adjust||'';
+}
+
+function renderWeeklyReviewWizard() {
+  const currentWeek = weekKey(todayStr());
+  const stats = weekStats(state, currentWeek, todayStr());
+  const statsEl = $('#weekly-review-stats');
+  if (statsEl) {
+    statsEl.innerHTML = [
+      ['Tareas', `${stats.tasksCompleted}/${stats.tasksTotal}`],
+      ['Rituales', `${stats.ritualRate}%`],
+      ['Foco', stats.focusSessions],
+      ['Días activos', stats.activeDays]
+    ].map(([label, value]) => `<div class="weekly-stat"><span>${esc(label)}</span><strong>${esc(String(value))}</strong></div>`).join('');
+  }
+  const goalsEl = $('#weekly-review-goals');
+  if (goalsEl) {
+    const goals = activeGoals();
+    goalsEl.innerHTML = goals.length ? goals.map(goal => `<div class="weekly-goal-row"><strong>${esc(goal.goal)}</strong><div class="grid-2"><input class="zen-input" type="number" min="0" max="100" value="${Number(goal.progress || 0)}" data-week-goal-progress="${esc(goal.id)}"><input class="zen-input" value="${esc(goal.nextStep || '')}" data-week-goal-step="${esc(goal.id)}" placeholder="Siguiente paso"></div><select class="zen-input" data-week-goal-status="${esc(goal.id)}"><option value="active" ${goal.status==='active'?'selected':''}>Activa</option><option value="paused" ${goal.status==='paused'?'selected':''}>Pausar</option><option value="done" ${goal.status==='done'?'selected':''}>Lograda</option></select></div>`).join('') : '<p class="card-subtitle">No hay metas activas todavía.</p>';
+  }
+  const focusEl = $('#weekly-review-focus');
+  if (focusEl) {
+    const selected = new Set(state.weekFocus?.goalIds || []);
+    focusEl.innerHTML = activeGoals().map(goal => `<label class="weekly-focus-row"><input type="checkbox" data-week-focus-goal="${esc(goal.id)}" ${selected.has(goal.id)?'checked':''}> <span>${esc(goal.goal)}</span></label>`).join('') || '<p class="card-subtitle">Crea una meta para elegir foco semanal.</p>';
+  }
+  const systemEl = $('#weekly-review-system');
+  if (systemEl) {
+    const rituals = (state.rituals || []).map(ritual => `<label class="weekly-focus-row"><input type="checkbox" data-week-ritual-keep="${esc(ritual.id)}" checked> <span>${esc(ritual.name)}</span></label>`).join('');
+    systemEl.innerHTML = `<div><span class="smart-label">Rituales</span>${rituals || '<p class="card-subtitle">Sin rituales todavía.</p>'}</div><div style="margin-top:14px;"><span class="smart-label">Dejar de hacer</span><div id="weekly-stop-doing-preview">${(state.stopDoingList||[]).filter(Boolean).map(item => `<span class="task-goal-tag">${esc(item)}</span>`).join('') || '<p class="card-subtitle">Sin lista todavía.</p>'}</div></div>`;
+  }
+}
+
+function renderAdvancedTools() {
+  const slot = $('#mind-advanced-tools');
+  const section = $('.profile-assessments-section');
+  if (slot && section && section.parentElement !== slot) slot.appendChild(section);
+  if (section) section.hidden = state.settings?.advancedTools !== true;
 }
 
 function renderLifeWheel() {
@@ -1328,12 +1539,33 @@ function renderLifeWheel() {
 // ─── SMART GOALS ───
 let smartAch=false;
 function initSmartGoals() {
-  $('#add-smart-btn').addEventListener('click',()=>{$('#smart-form').style.display='block';$('#add-smart-btn').style.display='none';});
+  $('#add-smart-btn').addEventListener('click',()=>openSmartForm());
   $('#cancel-smart-btn').addEventListener('click',()=>{$('#smart-form').style.display='none';$('#add-smart-btn').style.display='';clearSmart();});
   $('#smart-achievable').addEventListener('click',()=>{smartAch=!smartAch;$('#smart-achievable').classList.toggle('on',smartAch);});
   $('#smart-duration').addEventListener('input',()=>{$('#smart-duration-label').textContent=$('#smart-duration').value;});
   $('#smart-progress').addEventListener('input',()=>{$('#smart-progress-label').textContent=$('#smart-progress').value;});
   $('#save-smart-btn').addEventListener('click',saveSmart);
+}
+function openSmartForm(prefill = {}) {
+  renderSmartSelectors();
+  $('#smart-form').style.display='block';
+  $('#add-smart-btn').style.display='none';
+  if (prefill.goal) $('#smart-goal-input').value = prefill.goal;
+  if (prefill.nextStep) $('#smart-next-step').value = prefill.nextStep;
+  if (prefill.lifeArea && $('#smart-life-area')) $('#smart-life-area').value = prefill.lifeArea;
+  if (prefill.big5Index !== undefined && $('#smart-big5')) $('#smart-big5').value = String(prefill.big5Index);
+  switchTab('metas', { focus: true });
+  activateSubtab('metas', 'strat-quarterly', true);
+  $('#smart-goal-input')?.focus();
+}
+function renderSmartSelectors() {
+  const big5 = $('#smart-big5');
+  if (big5) {
+    const options = (state.annualBig5 || []).map((item, index) => ({ item, index })).filter(entry => entry.item);
+    big5.innerHTML = '<option value="">Sin vínculo</option>' + options.map(entry => `<option value="${entry.index}">${entry.index + 1}. ${esc(entry.item)}</option>`).join('');
+  }
+  const area = $('#smart-life-area');
+  if (area) area.innerHTML = '<option value="">Sin área</option>' + LIFE_WHEEL_AXES.map(axis => `<option value="${esc(axis.key)}">${esc(axis.label)}</option>`).join('');
 }
 function clearSmart(){
   $('#smart-goal-input').value='';
@@ -1344,6 +1576,8 @@ function clearSmart(){
   $('#smart-progress').value=0;
   $('#smart-progress-label').textContent='0';
   $('#smart-next-step').value='';
+  if($('#smart-big5')) $('#smart-big5').value='';
+  if($('#smart-life-area')) $('#smart-life-area').value='';
   smartAch=false;
   $('#smart-achievable').classList.remove('on');
 }
@@ -1359,6 +1593,11 @@ function saveSmart(){
     duration:+$('#smart-duration').value,
     progress:+$('#smart-progress').value,
     nextStep:$('#smart-next-step').value.trim(),
+    big5Index: $('#smart-big5')?.value === '' ? null : Number($('#smart-big5')?.value),
+    lifeArea: $('#smart-life-area')?.value || '',
+    status: +$('#smart-progress').value>=100 ? 'done' : 'active',
+    progressHistory: [{ date: todayStr(), progress: +$('#smart-progress').value }],
+    createdAt: new Date().toISOString(),
     startDate:todayStr(),
     completed:+$('#smart-progress').value>=100
   });
@@ -1381,7 +1620,7 @@ function renderSmartGoals(){
       if (bar) bar.style.width = `${value}%`;
     };
     inp.addEventListener('input', updateSmartProgressUI);
-    inp.addEventListener('change',()=>{const g=state.smartGoals.find(x=>x.id===inp.dataset.progressSm);if(g){g.progress=+inp.value;g.completed=g.progress>=100;saveState();if($('#tab-progress')&&$('#tab-progress').classList.contains('active'))renderProgress();}});
+    inp.addEventListener('change',()=>{const g=state.smartGoals.find(x=>x.id===inp.dataset.progressSm);if(g){recordGoalProgress(g,+inp.value);saveState();if($('#tab-reflection')&&$('#tab-reflection').classList.contains('active'))renderProgress();}});
   });
   c.querySelectorAll('[data-next-sm]').forEach(inp=>inp.addEventListener('blur',()=>{const g=state.smartGoals.find(x=>x.id===inp.dataset.nextSm);if(g){g.nextStep=inp.value.trim();saveState();}}));
 }
@@ -1408,7 +1647,7 @@ function renderGiants(){const c=$('#giants-container');if(!c)return;if(!state.ci
 
 // ─── QUARTERLY 10 ───
 function initQuarterly(){if($('#save-quarterly-btn'))$('#save-quarterly-btn').addEventListener('click',saveQuarterly);}
-function renderQuarterly10(){const c=$('#quarterly10-container');if(!c)return;c.innerHTML=state.quarterly10.map((item,i)=>`<div class="big5-item"><span class="big5-number" style="color:var(--accent-orange);">${i+1}</span><input class="zen-input" value="${esc(item)}" data-q10="${i}" placeholder="Prioridad ${i+1}..."></div>`).join('');c.querySelectorAll('[data-q10]').forEach(inp=>inp.addEventListener('blur',()=>{state.quarterly10[+inp.dataset.q10]=inp.value;saveState();}));}
+function renderQuarterly10(){const c=$('#quarterly10-container');if(!c)return;c.innerHTML=state.quarterly10.map((item,i)=>`<div class="big5-item quarterly-idea-item"><span class="big5-number" style="color:var(--accent-orange);">${i+1}</span><input class="zen-input" value="${esc(item)}" data-q10="${i}" placeholder="Idea ${i+1}...">${item?`<button class="zen-btn zen-btn-ghost" data-convert-q10="${i}">Convertir en meta</button>`:''}</div>`).join('');c.querySelectorAll('[data-q10]').forEach(inp=>inp.addEventListener('blur',()=>{state.quarterly10[+inp.dataset.q10]=inp.value;saveState();renderQuarterly10();}));c.querySelectorAll('[data-convert-q10]').forEach(btn=>btn.addEventListener('click',()=>{const idea=state.quarterly10[+btn.dataset.convertQ10]||'';if(idea)openSmartForm({goal:idea});}));}
 function saveQuarterly(){ $$('[data-q10]').forEach(inp=>{state.quarterly10[+inp.dataset.q10]=inp.value;}); state.sectionDates.quarterly=todayStr(); saveState(); logActivity(todayStr()); showToast('Prioridades trimestrales guardadas');}
 
 // ─── ANNUAL ───
@@ -1427,7 +1666,7 @@ function initAnnual() {
   }
 }
 function renderAnnual(){renderB5('annual-big5',state.annualBig5,'big5');renderB5('annual-values',state.values5,'values');renderB5('annual-become',state.mustBecome5,'become');const v=$('#vision-text');if(v&&document.activeElement!==v){v.value=state.visionText||'';}}
-function renderB5(cid,data,sk){const c=$(`#${cid}`);if(!c)return;const ph={big5:['Meta anual principal...','Segunda gran meta...','Tercer objetivo...','Cuarta prioridad...','Quinta meta...'],values:['Primer valor...','Segundo valor...','Tercer valor...','Cuarto valor...','Quinto valor...'],become:['¿En quién me convertiré?','Segunda identidad...','Tercer aspecto...','Cuarta cualidad...','Quinta transformación...']};c.innerHTML=data.map((item,i)=>`<div class="big5-item"><span class="big5-number">${i+1}</span><input class="zen-input" value="${esc(item)}" data-lk="${sk}" data-li="${i}" placeholder="${(ph[sk]&&ph[sk][i])||''}"></div>`).join('');c.querySelectorAll(`[data-lk="${sk}"]`).forEach(inp=>inp.addEventListener('blur',()=>{const idx=+inp.dataset.li;if(sk==='big5')state.annualBig5[idx]=inp.value;else if(sk==='values')state.values5[idx]=inp.value;else state.mustBecome5[idx]=inp.value;saveState();}));}
+function renderB5(cid,data,sk){const c=$(`#${cid}`);if(!c)return;const ph={big5:['Meta anual principal...','Segunda gran meta...','Tercer objetivo...','Cuarta prioridad...','Quinta meta...'],values:['Primer valor...','Segundo valor...','Tercer valor...','Cuarto valor...','Quinto valor...'],become:['¿En quién me convertiré?','Segunda identidad...','Tercer aspecto...','Cuarta cualidad...','Quinta transformación...']};c.innerHTML=data.map((item,i)=>{const activeCount=sk==='big5'?(state.smartGoals||[]).filter(goal=>goal.big5Index===i&&goal.status!=='done'&&goal.status!=='paused'&&!goal.completed).length:0;return`<div class="big5-item"><span class="big5-number">${i+1}</span><input class="zen-input" value="${esc(item)}" data-lk="${sk}" data-li="${i}" placeholder="${esc((ph[sk]&&ph[sk][i])||'')}">${sk==='big5'&&item?`<span class="task-goal-tag">${activeCount} metas activas</span>${activeCount===0?`<button class="zen-btn zen-btn-ghost" data-create-big5="${i}">Crear</button>`:''}`:''}</div>`;}).join('');c.querySelectorAll(`[data-lk="${sk}"]`).forEach(inp=>inp.addEventListener('blur',()=>{const idx=+inp.dataset.li;if(sk==='big5')state.annualBig5[idx]=inp.value;else if(sk==='values')state.values5[idx]=inp.value;else state.mustBecome5[idx]=inp.value;saveState();renderSmartSelectors();}));c.querySelectorAll('[data-create-big5]').forEach(btn=>btn.addEventListener('click',()=>openSmartForm({big5Index:+btn.dataset.createBig5})));}
 function saveAnnual(){
   const v=$('#vision-text');if(v)state.visionText=v.value;$$('[data-lk]').forEach(inp=>{const idx=+inp.dataset.li;if(inp.dataset.lk==='big5')state.annualBig5[idx]=inp.value;else if(inp.dataset.lk==='values')state.values5[idx]=inp.value;else if(inp.dataset.lk==='become')state.mustBecome5[idx]=inp.value;});state.sectionDates.annual=todayStr();saveState();logActivity(todayStr());showToast('Visión anual guardada');
   const editVisionBtn = $('#edit-vision-btn');
@@ -1642,6 +1881,11 @@ function initProfile() {
     state.coachPreferences.useSensitiveContext = event.target.checked;
     saveState();
   });
+  $('#profile-advanced-tools')?.addEventListener('change', event => {
+    state.settings.advancedTools = event.target.checked;
+    saveState();
+    renderAdvancedTools();
+  });
   $('#profile-coach-style')?.addEventListener('change', event => {
     state.coachPreferences.style = event.target.value;
     saveState();
@@ -1662,12 +1906,12 @@ function initProfile() {
 function saveProfile() {
   if (!state.userProfile) state.userProfile = { name: '', archetype: '', fears: '', values: '', learning: '', lifeHistory: '', enneagram: '', birthDate: '', birthTime: '', birthPlace: '' };
   state.userProfile.name = $('#profile-name').value;
-  if ($('#profile-archetype')) state.userProfile.archetype = $('#profile-archetype').value;
+  if (document.querySelector('#profile-archetype')) state.userProfile.archetype = document.querySelector('#profile-archetype').value;
   state.userProfile.fears = $('#profile-fears').value;
   state.userProfile.values = $('#profile-values').value;
-  if ($('#profile-learning')) state.userProfile.learning = $('#profile-learning').value;
+  if (document.querySelector('#profile-learning')) state.userProfile.learning = document.querySelector('#profile-learning').value;
   state.userProfile.lifeHistory = $('#profile-life-history').value;
-  if ($('#profile-enneagram')) state.userProfile.enneagram = $('#profile-enneagram').value;
+  if (document.querySelector('#profile-enneagram')) state.userProfile.enneagram = document.querySelector('#profile-enneagram').value;
   state.userProfile.birthDate = $('#profile-birth-date').value;
   state.userProfile.birthTime = $('#profile-birth-time').value;
   state.userProfile.birthPlace = $('#profile-birth-place').value;
@@ -1707,12 +1951,12 @@ function renderProfile() {
   if (!state.userProfile) state.userProfile = { name: '', archetype: '', fears: '', values: '', learning: '', lifeHistory: '', enneagram: '', birthDate: '', birthTime: '', birthPlace: '' };
   const p = state.userProfile;
   if($('#profile-name')) $('#profile-name').value = p.name || '';
-  if($('#profile-archetype')) $('#profile-archetype').value = p.archetype || '';
+  if(document.querySelector('#profile-archetype')) document.querySelector('#profile-archetype').value = p.archetype || '';
   if($('#profile-fears')) $('#profile-fears').value = p.fears || '';
   if($('#profile-values')) $('#profile-values').value = p.values || '';
-  if($('#profile-learning')) $('#profile-learning').value = p.learning || '';
+  if(document.querySelector('#profile-learning')) document.querySelector('#profile-learning').value = p.learning || '';
   if($('#profile-life-history')) $('#profile-life-history').value = p.lifeHistory || '';
-  if($('#profile-enneagram')) $('#profile-enneagram').value = p.enneagram || '';
+  if(document.querySelector('#profile-enneagram')) document.querySelector('#profile-enneagram').value = p.enneagram || '';
   if($('#profile-birth-date')) $('#profile-birth-date').value = p.birthDate || '';
   if($('#profile-birth-time')) $('#profile-birth-time').value = p.birthTime || '';
   if($('#profile-birth-place')) $('#profile-birth-place').value = p.birthPlace || '';
@@ -1736,6 +1980,7 @@ function renderProfile() {
   if($('#ai-context-sensitive')) $('#ai-context-sensitive').checked = state.coachPreferences.useSensitiveContext === true;
   if($('#profile-context-core')) $('#profile-context-core').checked = state.coachPreferences.useCoreContext !== false;
   if($('#profile-context-sensitive')) $('#profile-context-sensitive').checked = state.coachPreferences.useSensitiveContext === true;
+  if($('#profile-advanced-tools')) $('#profile-advanced-tools').checked = state.settings?.advancedTools === true;
   if($('#profile-coach-style')) $('#profile-coach-style').value = state.coachPreferences.style || 'direct';
   renderThemePresets();
   
@@ -1775,6 +2020,7 @@ function renderProgress() {
   ];
   const statsGrid = $('#stats-grid');
   if(statsGrid) statsGrid.innerHTML=stats.map(s=>`<div class="stat-card"><div class="stat-icon">${s.icon}</div><div class="stat-value" style="color:${s.color};">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('');
+  renderWeeklyReviewTrend();
 
   // Heatmap
   const hm=$('#heatmap'); if(hm){hm.innerHTML='';
@@ -1796,6 +2042,14 @@ function renderProgress() {
   rb.innerHTML=recentB.length?recentB.map(b=>`<div class="recent-item"><div class="recent-item-date">${fmtDate(b.date)}</div><div class="recent-item-belief">${esc(b.belief)}</div><div class="recent-item-reframe">-> ${esc(b.reframe)}</div></div>`).join(''):'<div class="empty-state" style="padding:20px;"><div class="empty-state-text">Sin creencias reconfiguradas</div></div>';}
 }
 
+function renderWeeklyReviewTrend() {
+  const c = $('#weekly-review-trend');
+  if (!c) return;
+  const reviews = (state.weeklyReviews || []).slice(-8);
+  if (!reviews.length) { c.innerHTML = ''; return; }
+  c.innerHTML = `<div class="glass-card"><div class="card-header"><div class="card-title-group"><div class="card-icon green">↗</div><h2 class="card-title">Tendencia de revisiones</h2></div></div><div class="trend-bars">${reviews.map(review => { const task = Number(review.stats?.taskRate || 0); const ritual = Number(review.stats?.ritualRate || 0); return `<div class="trend-bar-row"><span>${esc(review.weekKey || '')}</span><div class="trend-bar"><i style="width:${task}%"></i></div><div class="trend-bar ritual"><i style="width:${ritual}%"></i></div></div>`; }).join('')}</div></div>`;
+}
+
 function renderLifeAssessment() {
   const c = $('#life-assessment');
   if(!c) return;
@@ -1808,7 +2062,7 @@ function renderLifeAssessment() {
     state.lifeWheel[inp.dataset.lifeAxis] = +inp.value;
     saveState();
     renderLifeAssessment();
-    if ($('#tab-quarterly') && $('#tab-quarterly').classList.contains('active')) renderLifeWheel();
+    if ($('#tab-strategy') && $('#tab-strategy').classList.contains('active')) renderLifeWheel();
   }));
 }
 
@@ -1923,8 +2177,8 @@ ${getTodayRecommendationContext()}
 
 Formato obligatorio:
 1. Lectura del día en 2 líneas.
-2. Una acción esencial de 25 minutos.
-3. Tres pasos de ejecución.
+2. Tareas sugeridas desde los siguientes pasos de metas activas.
+3. Tres pasos de ejecución para la primera tarea.
 4. Un riesgo a evitar.
 5. Frase de cierre tipo mantra, sobria.`;
   try {
@@ -2249,16 +2503,26 @@ No presentes inferencias psicológicas, de personalidad o astrológicas como dia
 
 function buildWholeAppContext() {
   const avgLife = Math.round(LIFE_WHEEL_AXES.reduce((sum, axis) => sum + (Number(state.lifeWheel[axis.key]) || 0), 0) / LIFE_WHEEL_AXES.length * 10) / 10;
-  const smart = (state.smartGoals || []).map(g => `- ${g.goal} (${g.progress || 0}%): ${g.nextStep || 'sin siguiente paso'}`).join('\n') || 'Sin metas SMART';
-  const rituals = (state.rituals || []).map(r => `- ${r.name}`).join('\n') || 'Sin rituales';
+  const smart = activeGoals().map(g => `- ${g.goal} (${g.progress || 0}%): ${g.nextStep || 'sin siguiente paso'} | Big 5: ${g.big5Index !== null && g.big5Index !== undefined ? (state.annualBig5[g.big5Index] || 'sin texto') : 'sin vínculo'} | Área: ${getLifeAreaLabel(g.lifeArea) || 'sin área'}`).join('\n') || 'Sin metas SMART activas';
+  const rituals = (state.rituals || []).map(r => { const ad = ritualAdherence(state, r.id, todayStr(), 7); return `- ${r.name}: ${ad.completed}/${ad.scheduled} últimos 7 días${r.goalId ? ` (meta: ${getGoalTitle(r.goalId)})` : ''}`; }).join('\n') || 'Sin rituales';
+  const today = todayStr();
+  const todayTasks = (state.dailyTasks[today] || []).map(t => `${t.completed?'[x]':'[ ]'} ${t.text}${t.goalId?` (meta: ${getGoalTitle(t.goalId)})`:''}`).join('; ') || 'Sin tareas hoy';
+  const latestReview = [...(state.weeklyReviews || [])].sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
+  const lowAreas = lowLifeAreas(state, 4).map(area => `${getLifeAreaLabel(area.key)} ${area.value}/10`).join(', ') || 'Sin áreas bajo 4';
   const quarterly = (state.quarterly10 || []).filter(Boolean).map((x,i)=>`${i+1}. ${x}`).join('\n') || 'Sin prioridades trimestrales';
   const annual = (state.annualBig5 || []).filter(Boolean).map((x,i)=>`${i+1}. ${x}`).join('\n') || 'Sin Big 5 anual';
   const stop = (state.stopDoingList || []).filter(Boolean).map(x=>`- ${x}`).join('\n') || 'Sin lista de dejar de hacer';
   return `Promedio rueda de vida: ${avgLife}/10
+Áreas bajas: ${lowAreas}
+Foco semanal: ${(state.weekFocus?.goalIds || []).map(getGoalTitle).filter(Boolean).join(' | ') || 'Sin foco semanal'}
+Tareas de hoy: ${todayTasks}
 Metas SMART:
 ${smart}
 Rituales:
 ${rituals}
+Última revisión semanal:
+Salió bien: ${latestReview?.well || 'Sin revisión'}
+Ajuste: ${latestReview?.adjust || 'Sin revisión'}
 Aprendizaje: libro=${state.learning.book || '-'}, curso=${state.learning.course || '-'}, conferencia=${state.learning.conference || '-'}, mastermind=${state.learning.mastermind || '-'}
 Stop doing:
 ${stop}
@@ -2432,7 +2696,7 @@ function saveCoachMessageAs(type, messageId) {
     saveState(); renderPlanner(); showToast('Tarea añadida a Hoy');
   } else if (type === 'goal') {
     if (!confirm('¿Convertir esta recomendación en una meta activa?')) return;
-    state.smartGoals.push({ id: gid(), goal: message.content.slice(0, 180), measurable: '', achievable: true, relevance: 'Creada desde el Coach', duration: 30, progress: 0, nextStep: '', startDate: todayStr(), completed: false });
+    state.smartGoals.push({ id: gid(), goal: message.content.slice(0, 180), measurable: '', achievable: true, relevance: 'Creada desde el Coach', duration: 90, progress: 0, nextStep: '', big5Index: null, lifeArea: '', status: 'active', progressHistory: [{ date: todayStr(), progress: 0 }], createdAt: new Date().toISOString(), startDate: todayStr(), completed: false });
     saveState(); renderSmartGoals(); showToast('Meta creada');
   }
 }
@@ -2578,6 +2842,9 @@ function renderAll() {
   renderQuote(); renderPride(); renderGratitude(); 
   renderPlanner(); renderRituals(); renderDailyRitualsQuick(); renderWeeklyReflection(); 
   renderSmartGoals(); renderLearning(); renderStopDoing(); renderGiants(); renderQuarterly10(); renderAnnual(); renderPersonalMap(); renderProfile(); renderProgress(); renderBeliefsLibrary(); renderMantras(); updateXPDisplay(); checkBadges();
+  renderTodaySystem();
+  renderWeeklyReviewWizard();
+  renderAdvancedTools();
   renderJourneyStatus();
   updateClarityPanel();
   renderCalendar();
@@ -2588,29 +2855,11 @@ function renderAll() {
 // ─── ONBOARDING TOUR LOGIC ───
 let tourStep = 0;
 let tourWasRestarted = false;
-const onboardingDraft = { goal: '', action: '' };
+const onboardingDraft = { goal: '', action: '', habit: '' };
 const TOUR_STEPS = [
-  {
-    title: "Convierte claridad en acción",
-    desc: "ROKA conecta tus metas, tu día y tu progreso para mostrarte siempre el siguiente paso.",
-    input: false
-  },
-  {
-    title: "¿Qué quieres mover primero?",
-    desc: "Escribe una prioridad real. No tiene que estar perfecta; después podrás convertirla en una meta SMART completa.",
-    input: true,
-    label: "Mi prioridad",
-    placeholder: "Ejemplo: conseguir tres nuevos clientes este trimestre",
-    key: 'goal'
-  },
-  {
-    title: "Elige la primera acción",
-    desc: "Define algo que puedas comenzar hoy. El Coach podrá ayudarte a ajustar el plan cuando lo necesites.",
-    input: true,
-    label: "Mi primera acción",
-    placeholder: "Ejemplo: escribir y enviar la primera propuesta",
-    key: 'action'
-  }
+  { title: "¿Qué quieres lograr en los próximos 90 días?", desc: "Escribe un resultado concreto. ROKA lo convertirá en una meta activa.", input: true, label: "Meta a 90 días", placeholder: "Ejemplo: conseguir tres nuevos clientes este trimestre", key: 'goal' },
+  { title: "¿Cuál es el primer paso?", desc: "Define una acción que puedas poner en tu plan de hoy.", input: true, label: "Primer paso", placeholder: "Ejemplo: escribir y enviar la primera propuesta", key: 'action' },
+  { title: "¿Qué hábito diario te acerca a eso?", desc: "Este paso es opcional. Si lo escribes, se creará un ritual diario vinculado a la meta.", input: true, optional: true, label: "Hábito diario", placeholder: "Ejemplo: prospectar 20 minutos", key: 'habit' }
 ];
 
 function startOnboardingTour(restarted = false) {
@@ -2618,6 +2867,7 @@ function startOnboardingTour(restarted = false) {
   tourStep = 0;
   onboardingDraft.goal = '';
   onboardingDraft.action = '';
+  onboardingDraft.habit = '';
   showTourStep();
 }
 
@@ -2629,7 +2879,7 @@ function showTourStep() {
   const step = TOUR_STEPS[tourStep];
   $('#onboarding-title').textContent = step.title;
   $('#onboarding-desc').textContent = step.desc;
-  const stepIndicator = $('#onboarding-step') || $('#onboarding-steps');
+  const stepIndicator = $('#onboarding-step');
   if(stepIndicator) stepIndicator.textContent = `Paso ${tourStep + 1} de ${TOUR_STEPS.length}`;
   const wrap = $('#onboarding-input-wrap');
   const input = $('#onboarding-input');
@@ -2648,19 +2898,24 @@ async function handleTourNext() {
   const step = TOUR_STEPS[tourStep];
   if (step.input) {
     const value = $('#onboarding-input').value.trim();
-    if (!value) { showToast('Escribe una respuesta para continuar'); return; }
+    if (!value && !step.optional) { showToast('Escribe una respuesta para continuar'); return; }
     onboardingDraft[step.key] = value;
   }
   if (tourStep < TOUR_STEPS.length - 1) {
     tourStep++;
     showTourStep();
   } else {
-    if (onboardingDraft.goal) state.smartGoals.push({ id: gid(), goal: onboardingDraft.goal, measurable: '', achievable: true, relevance: 'Prioridad inicial', duration: 30, progress: 0, nextStep: onboardingDraft.action, startDate: todayStr(), completed: false });
+    let goalId = '';
+    if (onboardingDraft.goal) {
+      goalId = gid();
+      state.smartGoals.push({ id: goalId, goal: onboardingDraft.goal, measurable: '', achievable: true, relevance: 'Prioridad inicial', duration: 90, progress: 0, nextStep: onboardingDraft.action, big5Index: null, lifeArea: '', status: 'active', progressHistory: [{ date: todayStr(), progress: 0 }], createdAt: new Date().toISOString(), startDate: todayStr(), completed: false });
+    }
     if (onboardingDraft.action) {
       const today = todayStr();
       if (!state.dailyTasks[today]) state.dailyTasks[today] = [];
-      state.dailyTasks[today].push({ id: gid(), text: onboardingDraft.action, priority: 'high', completed: false });
+      state.dailyTasks[today].push({ id: gid(), text: onboardingDraft.action, priority: 'high', completed: false, goalId });
     }
+    if (onboardingDraft.habit && goalId) state.rituals.push({ id: gid(), name: onboardingDraft.habit, goalId, lifeArea: '', createdAt: new Date().toISOString(), days: { lun:true, mar:true, mie:true, jue:true, vie:true, sab:true, dom:true }, completions: {} });
     state.onboarding = { status: 'completed', completedAt: new Date().toISOString(), step: TOUR_STEPS.length };
     state.hasSeenOnboarding = true;
     await saveState(true);
@@ -2791,7 +3046,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v36-daily-rituals'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v37-product-system'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
