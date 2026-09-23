@@ -12,7 +12,7 @@ fix_*.py
 refactor_*.py
 
 *.png
-!assets/*.png
-!assets/*.webp
+!public/assets/*.png
+!public/assets/*.webp
 
 deployed-firestore.rules

@@ -56,7 +56,7 @@ export class Timer {
     this.$ = $;
     this.$$ = $$;
     this.onComplete = onComplete;
-    this.state = { minutes: 25, seconds: 0, running: false, interval: null, totalSeconds: 1500 };
+    this.state = { minutes: 25, seconds: 0, running: false, interval: null, totalSeconds: 1500, remainingMs: 1500000, endAt: 0 };
     this.activePattern = 'resonance';
     this.breathingInterval = null;
     this.audioCtx = null;
@@ -71,6 +71,9 @@ export class Timer {
     if (startBtn) startBtn.addEventListener('click', () => this.toggle());
     if (resetBtn) resetBtn.addEventListener('click', () => this.reset());
     if (focusBtn) focusBtn.addEventListener('click', () => this.toggleDeepFocus());
+    document.addEventListener('visibilitychange', () => {
+      if (this.state.running) this.tick();
+    });
 
     const timerContainer = document.querySelector('.timer-container');
     if (timerContainer) {
@@ -102,6 +105,8 @@ export class Timer {
     this.state.minutes = minutes;
     this.state.seconds = 0;
     this.state.totalSeconds = minutes * 60;
+    this.state.remainingMs = this.state.totalSeconds * 1000;
+    this.state.endAt = 0;
     this.updateDisplay();
   }
 
@@ -110,7 +115,10 @@ export class Timer {
   }
 
   start() {
+    const currentRemaining = this.getRemainingSeconds() || this.state.totalSeconds;
     this.state.running = true;
+    this.state.remainingMs = currentRemaining * 1000;
+    this.state.endAt = Date.now() + this.state.remainingMs;
     const startBtn = this.$('#timer-start-btn');
     if (startBtn) {
       startBtn.textContent = '⏸ Pausar';
@@ -132,24 +140,16 @@ export class Timer {
 
     this.startBreathingCycle();
 
-    this.state.interval = setInterval(() => {
-      if (this.state.seconds === 0) {
-        if (this.state.minutes === 0) {
-          this.complete();
-          return;
-        }
-        this.state.minutes--;
-        this.state.seconds = 59;
-      } else {
-        this.state.seconds--;
-      }
-      this.updateDisplay();
-    }, 1000);
+    this.tick();
+    this.state.interval = setInterval(() => this.tick(), 1000);
   }
 
   pause() {
+    if (this.state.running) this.state.remainingMs = Math.max(0, this.state.endAt - Date.now());
     this.state.running = false;
     clearInterval(this.state.interval);
+    this.state.interval = null;
+    this.state.endAt = 0;
     this.stopBreathingCycle();
 
     const startBtn = this.$('#timer-start-btn');
@@ -177,6 +177,8 @@ export class Timer {
     this.state.minutes = minutes;
     this.state.seconds = 0;
     this.state.totalSeconds = minutes * 60;
+    this.state.remainingMs = this.state.totalSeconds * 1000;
+    this.state.endAt = 0;
     const startBtn = this.$('#timer-start-btn');
     if (startBtn) startBtn.textContent = '▶ Iniciar';
     this.updateDisplay();
@@ -198,6 +200,21 @@ export class Timer {
     const elapsed = this.state.totalSeconds - (this.state.minutes * 60 + this.state.seconds);
     const percent = this.state.totalSeconds > 0 ? elapsed / this.state.totalSeconds : 0;
     if (progress) progress.setAttribute('stroke-dashoffset', CIRCLE_CIRCUMFERENCE * (1 - percent));
+  }
+
+  getRemainingSeconds() {
+    if (this.state.running && this.state.endAt) return Math.max(0, Math.ceil((this.state.endAt - Date.now()) / 1000));
+    if (this.state.remainingMs !== undefined) return Math.max(0, Math.ceil(this.state.remainingMs / 1000));
+    return Math.max(0, this.state.minutes * 60 + this.state.seconds);
+  }
+
+  tick() {
+    const remainingSeconds = this.getRemainingSeconds();
+    this.state.minutes = Math.floor(remainingSeconds / 60);
+    this.state.seconds = remainingSeconds % 60;
+    this.state.remainingMs = remainingSeconds * 1000;
+    this.updateDisplay();
+    if (remainingSeconds <= 0) this.complete();
   }
 
   startBreathingCycle() {

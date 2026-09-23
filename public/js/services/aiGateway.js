@@ -12,6 +12,7 @@ export async function callAIGateway({
   clientApiKey = ''
 }) {
   const payload = { mode, prompt, messages, context, systemInstruction, provider, model, clientApiKey };
+  const gatewayPayload = { mode, prompt, messages, context, systemInstruction, provider, model };
   if (clientApiKey && ['google', 'deepseek'].includes(provider)) {
     return callDirectProvider(payload);
   }
@@ -20,7 +21,7 @@ export async function callAIGateway({
     const response = await fetch(GATEWAY_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(gatewayPayload)
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'No se pudo conectar con el gateway de IA.');
@@ -93,9 +94,9 @@ async function callDirectOpenAI(payload) {
 async function callDirectGemini(payload) {
   const input = buildConversationPrompt(payload);
   const model = payload.model || 'gemini-2.5-flash';
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(payload.clientApiKey)}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': payload.clientApiKey },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: payload.systemInstruction || 'Responde en español con claridad.' }] },
       contents: [{ parts: [{ text: input }] }]

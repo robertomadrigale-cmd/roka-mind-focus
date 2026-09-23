@@ -9,7 +9,7 @@ https://roka-zen-full.web.app
 ## Desarrollo local
 
 ```bash
-python -m http.server 4173
+python -m http.server 4173 --directory public
 ```
 
 Luego abre:

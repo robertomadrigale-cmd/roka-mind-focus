@@ -9,7 +9,7 @@
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon.svg">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="css/main.css?v=10.0">
+  <link rel="stylesheet" href="css/main.css?v=10.8">
 </head>
 <body>
   
@@ -37,9 +37,10 @@
   <div id="cookie-banner" class="cookie-banner" style="display: none;">
     <div class="cookie-content">
       <span class="cookie-icon">◇</span>
-      <p class="cookie-text">Utilizamos almacenamiento local y cookies para sincronizar tu progreso en Firebase. Al continuar navegando, aceptas nuestra <a href="privacidad.html" style="text-decoration: underline; color: var(--accent-gold);">Política de Privacidad</a>.</p>
+      <p class="cookie-text">Usamos almacenamiento local esencial para sesión, preferencias y progreso offline. No cargamos analytics. Puedes aceptar o usar solo lo esencial. <a href="privacidad.html" style="text-decoration: underline; color: var(--accent-gold);">Política de Privacidad</a>.</p>
     </div>
     <div class="cookie-actions">
+      <button id="cookie-essential-btn" class="zen-btn zen-btn-ghost" style="padding: 6px 16px; font-size: 0.8rem;">Solo esenciales</button>
       <button id="cookie-accept-btn" class="zen-btn zen-btn-primary" style="padding: 6px 16px; font-size: 0.8rem;">Aceptar</button>
     </div>
   </div>
@@ -219,7 +220,7 @@
 
             <!-- Gratitud Diaria -->
             <div class="glass-card collapsible-section collapsed" id="gratitude-box">
-              <div class="card-header collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+              <div class="card-header collapsible-header">
                 <div style="display: flex; align-items: center; gap: 12px;">
                   <div class="card-icon green">+</div>
                   <h2 class="card-title">Gratitud Diaria</h2>
@@ -240,7 +241,7 @@
 
             <!-- Mis 3 Orgullos del Día -->
             <div class="glass-card collapsible-section collapsed" style="margin-top: 20px;">
-              <div class="card-header collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+              <div class="card-header collapsible-header">
                 <div style="display: flex; align-items: center; gap: 12px;">
                   <div class="card-icon gold">★</div>
                   <h2 class="card-title">Mis 3 Orgullos del Día</h2>
@@ -788,7 +789,7 @@
               <div class="profile-settings-panel profile-ai-panel">
                 <span class="page-eyebrow">Conexión IA</span>
                 <h2>Proveedor, modelo y llave</h2>
-                <p>Estos campos conectan el Coach, rutas e informes. La llave queda guardada en este dispositivo.</p>
+                <p>Estos campos conectan el Coach, rutas e informes. La llave queda solo en esta sesión salvo que elijas recordarla.</p>
                 <div class="ai-connection-grid">
                   <div class="smart-field">
                     <label class="smart-label" for="profile-ai-provider">Proveedor</label>
@@ -807,6 +808,7 @@
                   <label class="smart-label" for="profile-ai-api-key">API key</label>
                   <input id="profile-ai-api-key" class="zen-input" type="password" autocomplete="off" placeholder="Pega aquí tu llave de IA">
                 </div>
+                <label class="profile-setting-row"><span>Recordar en este dispositivo</span><input type="checkbox" id="profile-ai-remember-key"></label>
                 <div class="ai-key-actions">
                   <button class="zen-btn zen-btn-primary" id="profile-save-ai-key-btn">Guardar llave</button>
                   <button class="zen-btn zen-btn-ghost" id="profile-test-ai-connection-btn">Probar IA</button>
@@ -946,9 +948,10 @@
       </div>
       <div class="smart-field">
         <label class="smart-label" for="ai-api-key">API key</label>
-        <input id="ai-api-key" class="zen-input" type="password" autocomplete="off" placeholder="Se guarda en este dispositivo">
-        <p class="settings-security-note">La clave no se guarda en Firestore ni en la nube. Se conserva localmente en este navegador/dispositivo.</p>
+        <input id="ai-api-key" class="zen-input" type="password" autocomplete="off" placeholder="Se guarda en esta sesión">
+        <p class="settings-security-note">La clave no se guarda en Firestore ni en la nube. Se conserva solo hasta cerrar el navegador salvo que marques recordarla.</p>
       </div>
+      <label class="profile-setting-row"><span>Recordar en este dispositivo</span><input type="checkbox" id="ai-remember-key"></label>
       <div class="ai-key-actions">
         <button class="zen-btn zen-btn-ghost" id="save-ai-key-session-btn">Guardar clave</button>
         <button class="zen-btn zen-btn-ghost" id="test-ai-connection-btn">Probar conexión</button>
@@ -965,6 +968,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=10.7"></script>
+  <script type="module" src="js/app.js?v=10.8"></script>
 </body>
 </html>

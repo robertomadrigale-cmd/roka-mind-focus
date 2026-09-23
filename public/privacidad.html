@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Política de Privacidad de ROKA MIND FOCUS.">
+  <title>Política de Privacidad - ROKA MIND FOCUS</title>
+  <link rel="stylesheet" href="css/main.css?v=10.8">
+  <style>
+    body { background: var(--bg-base); color: var(--text-primary); padding: 40px 20px; }
+    .legal-container { max-width: 860px; margin: 0 auto; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 40px; }
+    .legal-title { font-family: 'Playfair Display', serif; font-size: 2.2rem; margin-bottom: 8px; text-align: center; }
+    .legal-subtitle { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 40px; }
+    .legal-content h2 { font-family: 'Playfair Display', serif; font-size: 1.4rem; margin: 32px 0 16px; color: var(--accent-gold); }
+    .legal-content p, .legal-content li { color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7; }
+    .legal-content ul { list-style-type: disc; padding-left: 20px; margin-bottom: 16px; }
+    .legal-content li { margin-bottom: 8px; }
+    .back-btn { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 24px; color: var(--accent-green); font-weight: 500; }
+  </style>
+</head>
+<body>
+  <!-- REVISIÓN LEGAL PENDIENTE -->
+  <div class="legal-container">
+    <a href="/" class="back-btn">← Volver al inicio</a>
+    <h1 class="legal-title">Política de Privacidad</h1>
+    <div class="legal-subtitle">Última actualización: 23 de septiembre de 2026</div>
+
+    <div class="legal-content">
+      <p>ROKA MIND FOCUS guarda información personal para ayudarte a planear, revisar progreso y usar funciones de Coach e informes con IA. Esta política explica qué datos se procesan, dónde se guardan y cuándo se comparten con proveedores externos.</p>
+
+      <h2>1. Información que recopilamos</h2>
+      <ul>
+        <li><strong>Cuenta:</strong> al iniciar sesión con Google/Firebase se procesa tu identificador de usuario, nombre, correo y foto de perfil.</li>
+        <li><strong>Datos de la app:</strong> metas SMART, tareas, rituales, rueda de vida, creencias, mantras, gratitud, orgullos, reflexiones, mapa personal, preferencias y configuración.</li>
+        <li><strong>Datos sensibles que tú decides escribir:</strong> historia de vida, miedos, valores, fecha/hora/lugar de nacimiento, eneagrama y notas personales.</li>
+      </ul>
+
+      <h2>2. Almacenamiento y sincronización</h2>
+      <p>Los datos se guardan en tu navegador para funcionamiento offline y se sincronizan con Firebase Firestore cuando inicias sesión. El estado local queda marcado por cuenta para evitar que otro usuario del mismo navegador reciba datos anteriores.</p>
+
+      <h2>3. Uso de IA y transferencia a terceros</h2>
+      <p>Cuando usas el Coach, rutas o informes, ROKA puede enviar a proveedores de IA el texto de tu conversación, el prompt solicitado y el contexto que autorices con los interruptores de la app. Si activas contexto sensible, también pueden enviarse miedos, historia personal y datos de nacimiento.</p>
+      <ul>
+        <li><strong>OpenAI:</strong> se usa mediante el gateway del servidor cuando está configurado.</li>
+        <li><strong>Google Gemini:</strong> puede usarse por gateway o llamada directa desde tu navegador si aportas tu API key.</li>
+        <li><strong>DeepSeek:</strong> puede usarse por gateway o llamada directa desde tu navegador si aportas tu API key. DeepSeek puede procesar datos fuera de México.</li>
+      </ul>
+      <p>La API key de IA la aporta el usuario. Por defecto se guarda solo en sessionStorage; solo se conserva en localStorage si marcas "Recordar en este dispositivo". No se guarda en Firestore.</p>
+
+      <h2>4. Cómo desactivar IA o reducir contexto</h2>
+      <p>Puedes borrar la API key desde Perfil, elegir no recordar la llave, cambiar proveedor/modelo o desactivar los interruptores de contexto de metas/progreso e historia personal/bloqueos. Si no usas Coach ni informes, esos textos no se envían a proveedores de IA.</p>
+
+      <h2>5. Cookies y almacenamiento local</h2>
+      <p>La app usa almacenamiento local esencial para sesión, preferencias, progreso offline y caché de PWA. Actualmente no carga analytics.</p>
+
+      <h2>6. Control de tus datos</h2>
+      <p>Puedes editar o exportar datos desde la app. Para solicitar eliminación completa de datos en la nube, contacta al responsable del servicio.</p>
+    </div>
+  </div>
+</body>
+</html>

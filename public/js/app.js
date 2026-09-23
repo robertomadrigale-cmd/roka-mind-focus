@@ -3,7 +3,9 @@ import { getAuth, GoogleAuthProvider, browserLocalPersistence, getRedirectResult
 import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 import { Timer } from "./components/Timer.js";
 import { LifeWheel, LIFE_WHEEL_AXES } from "./components/LifeWheel.js";
-import { callAIGateway } from "./services/aiGateway.js?v=10.7";
+import { localDateKey } from "./lib/dates.js";
+import { choosePersistedState, hasMeaningfulUserData, jsonSizeBytes, pruneStateForCloud, selectLocalCandidateForUser } from "./lib/persistence.js";
+import { callAIGateway } from "./services/aiGateway.js?v=10.8";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
 
 // ==========================================
@@ -73,6 +75,8 @@ const AI_PROVIDER_DEFAULTS = {
 const AI_PROVIDER_KEY = 'rokaMindAIProvider';
 const AI_MODEL_KEY = 'rokaMindAIModel';
 const AI_SESSION_KEY = 'rokaMindAIKey';
+const CLOUD_SAVE_DEBOUNCE_MS = 1500;
+const CLOUD_STATE_WARN_BYTES = 800 * 1024;
 const THEME_PRESET_KEY = 'rokaMindThemePreset';
 const THEME_PRESETS = [
   { code: 'zen-garden', name: 'Zen Garden', description: 'Niebla, piedra y calma profunda', swatches: ['#07120e', '#163226', '#8fcfba', '#d8c08a'] },
@@ -94,6 +98,9 @@ let coachThreads = [];
 let activeCoachThreadId = '';
 let activeCoachMessages = [];
 let reportCache = [];
+let lastAuthUid = '';
+let cloudSaveTimer = null;
+let pendingCloudSavePromise = null;
 
 function deepMerge(t, s) {
   const r = { ...t };
@@ -136,6 +143,7 @@ function normalizeState() {
     progress: Math.min(100, Math.max(0, Number(goal.progress || 0)))
   }));
   state.stateVersion = DEFAULT_STATE.stateVersion;
+  if (currentUser) state.ownerUid = currentUser.uid;
 }
 
 function parseStoredState(raw) {
@@ -148,51 +156,6 @@ function parseStoredState(raw) {
   }
 }
 
-function getStateTime(data) {
-  const value = data && (data.updatedAt || data.lastSavedAt || data.savedAt);
-  const time = value ? Date.parse(value) : 0;
-  return Number.isFinite(time) ? time : 0;
-}
-
-function hasMeaningfulUserData(data) {
-  if (!data || typeof data !== 'object') return false;
-  const today = todayStr();
-  return Boolean(
-    (data.beliefs && data.beliefs.length) ||
-    (data.mantras && data.mantras.length) ||
-    (data.victories && data.victories.length) ||
-    (data.prideLogs && data.prideLogs.length) ||
-    (data.gratitudeLogs && data.gratitudeLogs.length) ||
-    (data.smartGoals && data.smartGoals.length) ||
-    (data.rituals && data.rituals.length) ||
-    (data.circleOfGiants && data.circleOfGiants.length) ||
-    (data.dailyTasks && Object.keys(data.dailyTasks).some(key => (data.dailyTasks[key] || []).length)) ||
-    (data.userProfile && Object.values(data.userProfile).some(Boolean)) ||
-    (data.personalMap && (data.personalMap.archetype || data.personalMap.enneagram || data.personalMap.productivity)) ||
-    (data.weeklyReflection && (data.weeklyReflection.well || data.weeklyReflection.adjust)) ||
-    (data.learning && Object.values(data.learning).some(Boolean)) ||
-    (data.stopDoingList && data.stopDoingList.some(Boolean)) ||
-    (data.quarterly10 && data.quarterly10.some(Boolean)) ||
-    (data.annualBig5 && data.annualBig5.some(Boolean)) ||
-    (data.values5 && data.values5.some(Boolean)) ||
-    (data.mustBecome5 && data.mustBecome5.some(Boolean)) ||
-    (data.activityLog && data.activityLog[today])
-  );
-}
-
-function choosePersistedState(localData, remoteData) {
-  const localHasData = hasMeaningfulUserData(localData);
-  const remoteHasData = hasMeaningfulUserData(remoteData);
-  if (!remoteHasData && localHasData) return localData;
-  if (!localHasData && remoteHasData) return remoteData;
-
-  const localTime = getStateTime(localData);
-  const remoteTime = getStateTime(remoteData);
-  if (localTime || remoteTime) return localTime > remoteTime ? localData : remoteData;
-
-  return localHasData ? localData : remoteData;
-}
-
 const FETCH_TIMEOUT_MS = 12000;
 function withTimeout(promise) {
   return Promise.race([
@@ -202,9 +165,18 @@ function withTimeout(promise) {
 }
 
 function getCloudSafeState() {
-  const cloudState = JSON.parse(JSON.stringify(state));
+  const { state: prunedState, archive } = pruneStateForCloud(state);
+  if (Object.keys(archive.dailyTasks).length || Object.keys(archive.activityLog).length) {
+    state.localArchive = prunedState.localArchive;
+    state.dailyTasks = prunedState.dailyTasks || {};
+    state.activityLog = prunedState.activityLog || {};
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+  const cloudState = JSON.parse(JSON.stringify(prunedState));
   cloudState.pendingCloudSync = false;
   delete cloudState.lastCloudSyncError;
+  delete cloudState.ownerUid;
+  delete cloudState.localArchive;
   if (cloudState.aiConfig) {
     delete cloudState.aiConfig.apiKey;
     delete cloudState.aiConfig.provider;
@@ -213,49 +185,20 @@ function getCloudSafeState() {
   return cloudState;
 }
 
-async function loadState() {
+function getLocalCandidateForCurrentUser() {
   const localData = parseStoredState(localStorage.getItem(STORAGE_KEY));
-  let shouldSyncLocalToCloud = false;
-  try {
-    if (currentUser) {
-      const docRef = doc(db, "users", currentUser.uid);
-      const docSnap = await withTimeout(getDoc(docRef));
-      if (docSnap.exists()) {
-        const remoteData = docSnap.data();
-        const chosen = choosePersistedState(localData, remoteData);
-        shouldSyncLocalToCloud = chosen === localData && hasMeaningfulUserData(localData);
-        state = deepMerge(DEFAULT_STATE, chosen);
-      } else {
-        state = deepMerge(DEFAULT_STATE, localData);
-        shouldSyncLocalToCloud = hasMeaningfulUserData(localData);
-      }
-    } else {
-      state = deepMerge(DEFAULT_STATE, localData);
-    }
-  } catch(e) { 
-    console.warn('No se pudo cargar Firebase; usando datos locales.', e);
-    state = deepMerge(DEFAULT_STATE, localData);
-  }
-  normalizeState();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  if (currentUser && shouldSyncLocalToCloud) {
-    await saveState(true);
-  }
-  
-  if (currentUser && state.onboarding.status === 'not_started' && !hasMeaningfulUserData(state)) {
-    setTimeout(() => startOnboardingTour(), 700);
-  }
+  return currentUser ? selectLocalCandidateForUser(localData, currentUser.uid) : localData;
 }
 
 function loadLocalState() {
-  const localData = parseStoredState(localStorage.getItem(STORAGE_KEY));
+  const localData = getLocalCandidateForCurrentUser();
   state = deepMerge(DEFAULT_STATE, localData);
   normalizeState();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function applyFirstRunDefaultsIfNeeded() {
-  if (!currentUser || state.onboarding.status !== 'not_started' || hasMeaningfulUserData(state)) return false;
+  if (!currentUser || state.onboarding.status !== 'not_started' || hasMeaningfulUserData(state, todayStr())) return false;
   setTimeout(() => startOnboardingTour(), 700);
   return true;
 }
@@ -264,23 +207,26 @@ async function reconcileCloudStateInBackground() {
   if (!currentUser) return;
   updateAccountSyncStatus('saving');
   const beforeUpdatedAt = state.updatedAt;
-  const localData = parseStoredState(localStorage.getItem(STORAGE_KEY));
+  const localData = getLocalCandidateForCurrentUser();
   let shouldSyncLocalToCloud = false;
   try {
     const docRef = doc(db, "users", currentUser.uid);
     const docSnap = await withTimeout(getDoc(docRef));
     if (docSnap.exists()) {
       const remoteData = docSnap.data();
-      const chosen = choosePersistedState(localData, remoteData);
-      shouldSyncLocalToCloud = chosen === localData && hasMeaningfulUserData(localData);
+      const chosen = choosePersistedState(localData, remoteData, { uid: currentUser.uid, todayKey: todayStr() });
+      shouldSyncLocalToCloud = chosen === localData && hasMeaningfulUserData(localData, todayStr());
       state = deepMerge(DEFAULT_STATE, chosen);
     } else {
       state = deepMerge(DEFAULT_STATE, localData);
-      shouldSyncLocalToCloud = hasMeaningfulUserData(localData);
+      shouldSyncLocalToCloud = hasMeaningfulUserData(localData, todayStr());
     }
     normalizeState();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    if (shouldSyncLocalToCloud) await saveState(true);
+    if (shouldSyncLocalToCloud) {
+      await saveState(true);
+      await flushCloudSave();
+    }
     else {
       state.pendingCloudSync = false;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -297,6 +243,7 @@ async function saveState(quiet = false) {
   if (!quiet) showSaveStatus('saving');
   state.updatedAt = new Date().toISOString();
   state.pendingCloudSync = !!currentUser;
+  if (currentUser) state.ownerUid = currentUser.uid;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (currentUser) updateAccountSyncStatus('saving');
 
@@ -307,8 +254,45 @@ async function saveState(quiet = false) {
     return;
   }
 
+  scheduleCloudSave(quiet);
+}
+
+function scheduleCloudSave(quiet = false) {
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(() => {
+    pendingCloudSavePromise = writeCloudState(quiet).finally(() => {
+      pendingCloudSavePromise = null;
+    });
+  }, CLOUD_SAVE_DEBOUNCE_MS);
+}
+
+async function flushCloudSave(quiet = true) {
+  if (!currentUser) return;
+  if (cloudSaveTimer) {
+    clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = null;
+    pendingCloudSavePromise = writeCloudState(quiet).finally(() => {
+      pendingCloudSavePromise = null;
+    });
+  }
+  if (pendingCloudSavePromise) await pendingCloudSavePromise;
+}
+
+async function writeCloudState(quiet = false) {
+  if (!currentUser) return;
+  const cloudState = getCloudSafeState();
+  const cloudSize = jsonSizeBytes(cloudState);
+  if (cloudSize > CLOUD_STATE_WARN_BYTES) {
+    state.pendingCloudSync = true;
+    state.lastCloudSyncError = 'El documento local supera el tamaño recomendado para sincronizar.';
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    console.warn(`Estado no sincronizado: ${cloudSize} bytes supera el umbral de ${CLOUD_STATE_WARN_BYTES}.`);
+    updateAccountSyncStatus('pending');
+    if (!quiet) showSaveStatus('warning', 'Guardado local. Reduce historial antes de sincronizar.');
+    return;
+  }
   try {
-    await withTimeout(setDoc(doc(db, "users", currentUser.uid), getCloudSafeState()));
+    await withTimeout(setDoc(doc(db, "users", currentUser.uid), cloudState));
     state.pendingCloudSync = false;
     delete state.lastCloudSyncError;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -332,10 +316,7 @@ async function syncPendingState() {
     return;
   }
   try {
-    const nextState = deepMerge(DEFAULT_STATE, localData);
-    nextState.pendingCloudSync = false;
-    delete nextState.lastCloudSyncError;
-    await withTimeout(setDoc(doc(db, "users", currentUser.uid), nextState));
+    await withTimeout(setDoc(doc(db, "users", currentUser.uid), getCloudSafeState()));
     state.pendingCloudSync = false;
     delete state.lastCloudSyncError;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -350,7 +331,7 @@ async function syncPendingState() {
 // ─── UTILITIES ───
 function gid() { return Date.now().toString(36)+Math.random().toString(36).substr(2,5); }
 function fmtDate(d) { const x=d instanceof Date?d:new Date(d); return `${String(x.getDate()).padStart(2,'0')}/${String(x.getMonth()+1).padStart(2,'0')}/${x.getFullYear()}`; }
-function todayStr() { return new Date().toISOString().split('T')[0]; }
+function todayStr(date = new Date()) { return localDateKey(date); }
 const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
 function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function showToast(m) { const t=$('#toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800); }
@@ -393,10 +374,6 @@ function updateAccountSyncStatus(status = 'idle') {
   el.dataset.status = status;
 }
 
-function isMobileAuthFlow() {
-  return false;
-}
-
 function updateMobileViewportVars() {
   const viewport = window.visualViewport;
   const width = Math.round(viewport?.width || window.innerWidth || document.documentElement.clientWidth);
@@ -431,15 +408,17 @@ function clearAccidentalSelection(event) {
   if (selection && !selection.isCollapsed) selection.removeAllRanges();
 }
 
-function initSelectionGuard() {
-  document.addEventListener('selectionchange', () => {
-    const selection = window.getSelection && window.getSelection();
-    if (!selection || selection.isCollapsed || isEditableSelectionTarget(selection.anchorNode)) return;
-    window.setTimeout(() => {
-      const current = window.getSelection && window.getSelection();
-      if (current && !current.isCollapsed && !isEditableSelectionTarget(current.anchorNode)) current.removeAllRanges();
-    }, 0);
-  });
+function clearLocalSession({ render = true } = {}) {
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = null;
+  localStorage.removeItem(STORAGE_KEY);
+  clearStoredAIKey();
+  state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  coachThreads = [];
+  activeCoachThreadId = '';
+  activeCoachMessages = [];
+  reportCache = [];
+  if (render && appInitialized) renderAll();
 }
 
 // ─── AUTHENTICATION ───
@@ -468,6 +447,7 @@ function initAuth() {
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       currentUser = user;
+      lastAuthUid = user.uid;
       $('#auth-overlay').style.display = 'none';
       $('#app').style.display = 'grid';
       const avatar = $('#profile-avatar-btn');
@@ -488,7 +468,12 @@ function initAuth() {
         btn.className = 'zen-btn zen-btn-ghost';
         btn.style.padding = '6px 12px';
         btn.textContent = 'Cerrar Sesión';
-        btn.addEventListener('click', () => signOut(auth));
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          await withTimeout(flushCloudSave(true)).catch(error => console.warn('No se pudo completar el guardado antes de cerrar sesión.', error));
+          clearLocalSession({ render: false });
+          await signOut(auth);
+        });
         $('.header-right').appendChild(btn);
       }
 
@@ -507,7 +492,9 @@ function initAuth() {
         await Promise.all([loadCoachThreads(), loadReports(), migrateLegacyReports()]);
       });
     } else {
+      if (lastAuthUid) clearLocalSession({ render: false });
       currentUser = null;
+      lastAuthUid = '';
       $('#auth-overlay').style.display = 'flex';
       $('#app').style.display = 'none';
       if($('#logout-btn')) $('#logout-btn').remove();
@@ -522,11 +509,6 @@ function initAuth() {
     provider.setCustomParameters({ prompt: 'select_account' });
     try {
       await setPersistence(auth, browserLocalPersistence);
-      if (isMobileAuthFlow()) {
-        $('#auth-loading').textContent = 'Abriendo Google...';
-        await signInWithRedirect(auth, provider);
-        return;
-      }
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error(error);
@@ -784,16 +766,6 @@ function switchTab(t, options = {}) {
   }
 }
 
-function moveRoute(direction) {
-  const currentIndex = ROUTE_ORDER.indexOf(activeRoute);
-  const nextIndex = Math.min(ROUTE_ORDER.length - 1, Math.max(0, currentIndex + direction));
-  switchTab(ROUTE_ORDER[nextIndex]);
-}
-
-function renderRoutePager() {
-  // Navigation is now handled by the sidebar/bottom nav
-}
-
 function updateHeaderDate() {
   const now=new Date(), opts={weekday:'long',year:'numeric',month:'long',day:'numeric'};
   const s=now.toLocaleDateString('es-MX',opts);
@@ -832,7 +804,7 @@ function isRitualScheduled(ritual, dateStr) {
 function calcStreak() {
   let streak=0, d=new Date();
   for(let i=0;i<365;i++) {
-    const key=d.toISOString().split('T')[0];
+    const key = localDateKey(d);
     const hasVictory=state.victories.some(v=>v.date===key);
     const hasPride=state.prideLogs.some(p=>p.date===key);
     const hasGratitude=state.gratitudeLogs && state.gratitudeLogs.some(g=>g.date===key);
@@ -1342,7 +1314,7 @@ function renderWeeklyReflection() {
 }
 
 function renderLifeWheel() {
-  if (!lifeWheelComponent) lifeWheelComponent = new LifeWheel({ $, state, saveState });
+  if (!lifeWheelComponent) lifeWheelComponent = new LifeWheel({ $, getState: () => state, saveState });
   lifeWheelComponent.render();
 }
 
@@ -1392,7 +1364,18 @@ function renderSmartGoals(){
     const real=Math.min(100,Math.max(0,Number(g.progress||0)));
     return`<div class="smart-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;"><div><div style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;margin-bottom:8px;">${esc(g.goal)}</div><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;"><div class="smart-field"><span class="smart-label">Medible</span><div style="font-size:0.9rem;">${esc(g.measurable||'—')}</div></div><div class="smart-field"><span class="smart-label">Relevancia</span><div style="font-size:0.9rem;">${esc(g.relevance||'—')}</div></div><div class="smart-field"><span class="smart-label">Alcanzable</span><div style="font-size:0.9rem;">${g.achievable?'Si':'No definido'}</div></div><div class="smart-field"><span class="smart-label">Plazo</span><div style="font-size:0.9rem;">${g.duration} dias (quedan ${dl})</div></div></div></div><button class="btn-delete" data-del-sm="${g.id}" style="opacity:0.6;">✕</button></div><div class="smart-progress-panel"><div class="smart-progress-row"><span class="smart-label">Avance real</span><strong>${real}%</strong></div><input type="range" class="timeline-slider smart-progress-input" min="0" max="100" value="${real}" data-progress-sm="${g.id}"><div class="smart-progress-track"><div style="width:${real}%"></div></div><label class="smart-label" style="margin-top:12px;">Siguiente avance visible</label><input class="zen-input smart-next-step-input" value="${esc(g.nextStep||'')}" data-next-sm="${g.id}" placeholder="Define el siguiente paso medible..."><div class="smart-time-progress"><span>Progreso temporal</span><span>${pr}%</span></div></div></div>`;}).join('');
   c.querySelectorAll('[data-del-sm]').forEach(b=>b.addEventListener('click',()=>{state.smartGoals=state.smartGoals.filter(g=>g.id!==b.dataset.delSm);saveState();renderSmartGoals();}));
-  c.querySelectorAll('[data-progress-sm]').forEach(inp=>inp.addEventListener('input',()=>{const g=state.smartGoals.find(x=>x.id===inp.dataset.progressSm);if(g){g.progress=+inp.value;g.completed=g.progress>=100;saveState();renderSmartGoals();if($('#tab-progress')&&$('#tab-progress').classList.contains('active'))renderProgress();}}));
+  c.querySelectorAll('[data-progress-sm]').forEach(inp=>{
+    const updateSmartProgressUI = () => {
+      const card = inp.closest('.smart-card');
+      const value = +inp.value;
+      const strong = card?.querySelector('.smart-progress-row strong');
+      const bar = card?.querySelector('.smart-progress-track > div');
+      if (strong) strong.textContent = `${value}%`;
+      if (bar) bar.style.width = `${value}%`;
+    };
+    inp.addEventListener('input', updateSmartProgressUI);
+    inp.addEventListener('change',()=>{const g=state.smartGoals.find(x=>x.id===inp.dataset.progressSm);if(g){g.progress=+inp.value;g.completed=g.progress>=100;saveState();if($('#tab-progress')&&$('#tab-progress').classList.contains('active'))renderProgress();}});
+  });
   c.querySelectorAll('[data-next-sm]').forEach(inp=>inp.addEventListener('blur',()=>{const g=state.smartGoals.find(x=>x.id===inp.dataset.nextSm);if(g){g.nextStep=inp.value.trim();saveState();}}));
 }
 
@@ -1587,7 +1570,7 @@ function renderDayDetail(dateStr) {
     ['Orgullos', activity.prides.map(x => x.content)],
     ['Victorias', activity.victories.map(x => x.content || x.text || x.title || 'Victoria registrada')],
     ['Creencias reconfiguradas', activity.beliefs.map(x => `${x.belief} -> ${x.reframe}`)],
-    ['Sesiones de enfoque', activity.focusCount ? [`${activity.focusCount} accion(es) registradas`] : []]
+    ['Sesiones de enfoque', activity.focusCount ? [`${activity.focusCount} acción(es) registradas`] : []]
   ];
   const html = groups.filter(([,items]) => Array.isArray(items) ? items.length : items).map(([title,items]) => `
     <div class="cal-detail-group">
@@ -1698,10 +1681,10 @@ function saveAIConfig(source = 'modal') {
   state.coachPreferences.useCoreContext = $('#ai-context-core')?.checked !== false;
   state.coachPreferences.useSensitiveContext = $('#ai-context-sensitive')?.checked === true;
   saveAIConnectionFields(source);
-  const { keyEl } = getAIFormFields(source);
+  const { keyEl, rememberEl } = getAIFormFields(source);
   const typedKey = keyEl?.value.trim() || '';
   if (typedKey) {
-    storeAIKey(typedKey);
+    storeAIKey(typedKey, rememberEl?.checked === true);
     if (keyEl) keyEl.value = '';
   }
   delete state.aiConfig.apiKey;
@@ -1739,6 +1722,8 @@ function renderProfile() {
   syncAIConnectionFormFields(provider, getAIModel(provider));
   if($('#ai-api-key')) $('#ai-api-key').value = '';
   if($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
+  if($('#ai-remember-key')) $('#ai-remember-key').checked = Boolean(localStorage.getItem(AI_SESSION_KEY));
+  if($('#profile-ai-remember-key')) $('#profile-ai-remember-key').checked = Boolean(localStorage.getItem(AI_SESSION_KEY));
   updateAIConnectionStatus();
   if($('#ai-context-core')) $('#ai-context-core').checked = state.coachPreferences.useCoreContext !== false;
   if($('#ai-context-sensitive')) $('#ai-context-sensitive').checked = state.coachPreferences.useSensitiveContext === true;
@@ -1768,7 +1753,7 @@ function renderProgress() {
   const totalV=state.victories.length, totalB=state.beliefs.length, totalM=state.mantras.length;
   const totalP=state.prideLogs.length, totalG=state.smartGoals.length;
   renderLifeAssessment();
-  let streak=0; { let d=new Date(); for(let i=0;i<365;i++){const k=d.toISOString().split('T')[0];const has=getDayActivity(k).total;if(has){streak++;d.setDate(d.getDate()-1);}else{if(i===0){d.setDate(d.getDate()-1);continue;}break;}} }
+  let streak=0; { let d=new Date(); for(let i=0;i<365;i++){const k=localDateKey(d);const has=getDayActivity(k).total;if(has){streak++;d.setDate(d.getDate()-1);}else{if(i===0){d.setDate(d.getDate()-1);continue;}break;}} }
   const ritualRate=(()=>{if(!state.rituals.length)return 0;const dk=['dom','lun','mar','mie','jue','vie','sab'];let total=0,done=0;state.rituals.forEach(r=>{dk.forEach(d=>{total++;if(r.days&&r.days[d]===true)done++;});});return total>0?Math.round(done/total*100):0;})();
 
   const stats=[
@@ -1786,7 +1771,7 @@ function renderProgress() {
 
   // Heatmap
   const hm=$('#heatmap'); if(hm){hm.innerHTML='';
-  for(let i=29;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const k=d.toISOString().split('T')[0];
+  for(let i=29;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const k=localDateKey(d);
     let count=getDayActivity(k).total;
     const lvl=count===0?'':count===1?'level-1':count===2?'level-2':count===3?'level-3':'level-4';
     const cell=document.createElement('div');cell.className=`heatmap-cell ${lvl}`;cell.title=`${fmtDate(d)}: ${count} actividades`;hm.appendChild(cell);}}
@@ -1915,7 +1900,7 @@ function getTodayRecommendationContext() {
   const status = getUserJourneyStatus();
   return `Fecha: ${today}
 Completitud: ${status.score}%
-Siguiente accion detectada: ${status.nextAction}
+Siguiente acción detectada: ${status.nextAction}
 Tareas de hoy: ${tasks.map(t => `${t.completed ? '[x]' : '[ ]'} ${t.text} (${t.priority || 'media'})`).join('; ') || 'Sin tareas'}
 Gratitud: ${gratitude}
 Orgullos: ${prides}
@@ -1930,14 +1915,14 @@ async function generateDailyAIRoute() {
 ${getTodayRecommendationContext()}
 
 Formato obligatorio:
-1. Lectura del dia en 2 lineas.
-2. Una accion esencial de 25 minutos.
-3. Tres pasos de ejecucion.
+1. Lectura del día en 2 líneas.
+2. Una acción esencial de 25 minutos.
+3. Tres pasos de ejecución.
 4. Un riesgo a evitar.
 5. Frase de cierre tipo mantra, sobria.`;
   try {
     showSaveStatus('ai');
-    const response = await callAI(prompt, 'Eres un coach central de vida, productividad y enfoque. Tono ryokan: sobrio, claro, directo, sin motivacion generica.');
+    const response = await callAI(prompt, 'Eres un coach central de vida, productividad y enfoque. Tono ryokan: sobrio, claro, directo, sin motivación genérica.');
     const report = { id: gid(), type: 'daily-route', title: 'Ruta Zen de Hoy', content: response, date: todayStr() };
     await saveAIReport(report);
     renderJourneyStatus();
@@ -1950,7 +1935,7 @@ Formato obligatorio:
 }
 
 async function generateWeeklyReview() {
-  const prompt = `Genera una revision semanal accionable a partir del sistema ROKA.
+  const prompt = `Genera una revisión semanal accionable a partir del sistema ROKA.
 
 ${getTodayRecommendationContext()}
 
@@ -1962,8 +1947,8 @@ Formato obligatorio:
 5. Siguiente paso SMART.`;
   try {
     showSaveStatus('ai');
-    const response = await callAI(prompt, 'Eres un estratega semanal. Lee patrones, contradicciones y siguiente accion. Nada de relleno.');
-    const report = { id: gid(), type: 'weekly-review', title: 'Revision Semanal IA', content: response, date: todayStr() };
+    const response = await callAI(prompt, 'Eres un estratega semanal. Lee patrones, contradicciones y siguiente acción. Nada de relleno.');
+    const report = { id: gid(), type: 'weekly-review', title: 'Revisión Semanal IA', content: response, date: todayStr() };
     await saveAIReport(report);
     switchTab('coach');
     showCoachView('reports');
@@ -2008,9 +1993,10 @@ function getStoredAIKey() {
   return sessionStorage.getItem(AI_SESSION_KEY) || localStorage.getItem(AI_SESSION_KEY) || '';
 }
 
-function storeAIKey(key) {
+function storeAIKey(key, remember = false) {
   sessionStorage.setItem(AI_SESSION_KEY, key);
-  localStorage.setItem(AI_SESSION_KEY, key);
+  if (remember) localStorage.setItem(AI_SESSION_KEY, key);
+  else localStorage.removeItem(AI_SESSION_KEY);
 }
 
 function clearStoredAIKey() {
@@ -2053,7 +2039,8 @@ function getAIFormFields(source = 'profile') {
   return {
     providerEl: $(`#${prefix}-provider`),
     modelEl: $(`#${prefix}-model`),
-    keyEl: $(`#${prefix}-api-key`)
+    keyEl: $(`#${prefix}-api-key`),
+    rememberEl: $(`#${prefix}-remember-key`)
   };
 }
 
@@ -2082,13 +2069,13 @@ function syncAIConnectionFormFields(provider = getAIProvider(), model = getAIMod
 
 function saveAIKeyForSession(source = 'profile') {
   const config = saveAIConnectionFields(source);
-  const { keyEl } = getAIFormFields(source);
+  const { keyEl, rememberEl } = getAIFormFields(source);
   const key = keyEl?.value.trim() || '';
   if (!key) {
     showToast('Pega una API key para guardarla');
     return;
   }
-  storeAIKey(key);
+  storeAIKey(key, rememberEl?.checked === true);
   if ($('#ai-api-key')) $('#ai-api-key').value = '';
   if ($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
   const route = config.provider === 'openai' ? 'gateway /api/ai' : `directo ${config.provider === 'google' ? 'Gemini' : 'DeepSeek'}`;
@@ -2107,7 +2094,7 @@ function clearAIKeyForSession() {
 async function testAIConnection(source = 'profile') {
   if (!currentUser) { showToast('Inicia sesión para probar la IA'); return; }
   saveAIConnectionFields(source);
-  const { keyEl } = getAIFormFields(source);
+  const { keyEl, rememberEl } = getAIFormFields(source);
   const typedKey = keyEl?.value.trim() || '';
   const config = { ...getAIConnectionConfig(), clientApiKey: typedKey || getStoredAIKey() };
   try {
@@ -2116,13 +2103,13 @@ async function testAIConnection(source = 'profile') {
     const result = await callAIGateway({
       mode: 'chat',
       authToken,
-      messages: [{ role: 'user', content: 'Responde solamente: conexion ok' }],
-      context: 'Prueba tecnica breve de conexion IA.',
-      systemInstruction: 'Responde en español, con dos palabras como maximo.',
+      messages: [{ role: 'user', content: 'Responde solamente: conexión ok' }],
+      context: 'Prueba técnica breve de conexión IA.',
+      systemInstruction: 'Responde en español, con dos palabras como máximo.',
       ...config
     });
     if (typedKey) {
-      storeAIKey(typedKey);
+      storeAIKey(typedKey, rememberEl?.checked === true);
       if ($('#ai-api-key')) $('#ai-api-key').value = '';
       if ($('#profile-ai-api-key')) $('#profile-ai-api-key').value = '';
     }
@@ -2350,7 +2337,7 @@ function renderCoachMessages() {
   if (!activeCoachMessages.length) {
     container.innerHTML = `<div class="coach-welcome"><div class="coach-mark">R</div><h3>¿Qué necesitas resolver?</h3><p>Puedo ayudarte a elegir una prioridad, convertir una idea en meta o revisar por qué te estás deteniendo.</p><div class="coach-starters"><button data-coach-prompt="Ayúdame a elegir la acción más importante para hoy.">Priorizar mi día</button><button data-coach-prompt="Revisa mis metas y dime cuál necesita atención primero.">Revisar mis metas</button><button data-coach-prompt="Estoy bloqueado. Hazme preguntas para encontrar el siguiente paso.">Salir de un bloqueo</button></div></div>`;
   } else {
-    container.innerHTML = activeCoachMessages.map(message => `<div class="coach-message ${message.role}${message.failed ? ' failed' : ''}"><div class="coach-message-bubble">${esc(message.content)}${message.role === 'assistant' ? `<div class="coach-message-actions">${message.failed ? `<button data-message-action="retry" data-message-id="${message.id}">Reintentar</button>` : `<button data-message-action="task" data-message-id="${message.id}">Guardar como tarea</button><button data-message-action="goal" data-message-id="${message.id}">Convertir en meta</button>`}</div>` : ''}</div></div>`).join('');
+    container.innerHTML = activeCoachMessages.map(message => `<div class="coach-message ${message.role}${message.failed ? ' failed' : ''}"><div class="coach-message-bubble">${esc(message.content)}${message.role === 'assistant' ? `<div class="coach-message-actions">${message.failed ? `<button data-message-action="retry" data-message-id="${message.id}">Reintentar</button><button data-message-action="copy" data-message-id="${message.id}">Copiar</button>` : `<button data-message-action="copy" data-message-id="${message.id}">Copiar</button><button data-message-action="task" data-message-id="${message.id}">Guardar como tarea</button><button data-message-action="goal" data-message-id="${message.id}">Convertir en meta</button>`}</div>` : ''}</div></div>`).join('');
   }
   container.querySelectorAll('[data-coach-prompt]').forEach(button => button.addEventListener('click', () => {
     $('#coach-input').value = button.dataset.coachPrompt;
@@ -2428,6 +2415,8 @@ function saveCoachMessageAs(type, messageId) {
     activeCoachMessages = activeCoachMessages.filter(item => item.id !== messageId);
     renderCoachMessages();
     requestCoachReply();
+  } else if (type === 'copy') {
+    navigator.clipboard.writeText(message.content || '').then(() => showToast('Respuesta copiada')).catch(() => showToast('No se pudo copiar'));
   } else if (type === 'task') {
     if (!confirm('¿Guardar esta recomendación como tarea para hoy?')) return;
     const today = todayStr();
@@ -2507,6 +2496,7 @@ async function migrateLegacyReports() {
     state.reportsMigrated = true;
     state.aiReports = [];
     await saveState(true);
+    await flushCloudSave();
     await loadReports();
   } catch (error) {
     console.warn('Los informes anteriores se conservaron porque la migración no terminó.', error);
@@ -2569,6 +2559,7 @@ function renderAIReportsList() {
       state.aiReports = (state.aiReports || []).filter(item => item.id !== report.id);
       if (currentUser) await deleteDoc(doc(db, 'users', currentUser.uid, 'reports', report.id)).catch(() => {});
       await saveState(true);
+      await flushCloudSave();
       renderAIReportsList();
     }
   }));
@@ -2615,13 +2606,13 @@ const TOUR_STEPS = [
   }
 ];
 
-window.startOnboardingTour = function(restarted = false) {
+function startOnboardingTour(restarted = false) {
   tourWasRestarted = restarted;
   tourStep = 0;
   onboardingDraft.goal = '';
   onboardingDraft.action = '';
   showTourStep();
-};
+}
 
 function showTourStep() {
   const overlay = $('#onboarding-overlay');
@@ -2666,6 +2657,7 @@ async function handleTourNext() {
     state.onboarding = { status: 'completed', completedAt: new Date().toISOString(), step: TOUR_STEPS.length };
     state.hasSeenOnboarding = true;
     await saveState(true);
+    await flushCloudSave();
     renderAll();
     closeTour(false);
     switchTab('hoy');
@@ -2679,6 +2671,7 @@ function closeTour(skipped = true) {
     state.onboarding = { status: 'skipped', completedAt: new Date().toISOString(), step: tourStep };
     state.hasSeenOnboarding = true;
     saveState(true);
+    flushCloudSave(true).catch(() => {});
   }
   showToast(skipped ? 'Puedes volver a la introducción desde Perfil' : 'Tu primer día está listo');
 }
@@ -2689,13 +2682,21 @@ function initCookieBanner() {
     const banner = $('#cookie-banner');
     if (banner) {
       banner.style.display = 'flex';
-      $('#cookie-accept-btn').addEventListener('click', () => {
-        localStorage.setItem('rokaCookiesAccepted', 'true');
+      const close = value => {
+        localStorage.setItem('rokaCookiesAccepted', value);
         banner.style.display = 'none';
         showToast('Preferencias guardadas');
-      });
+      };
+      $('#cookie-accept-btn')?.addEventListener('click', () => close('accepted'));
+      $('#cookie-essential-btn')?.addEventListener('click', () => close('essential'));
     }
   }
+}
+
+function initCollapsibleSections() {
+  $$('.collapsible-header').forEach(header => {
+    header.addEventListener('click', () => header.parentElement?.classList.toggle('collapsed'));
+  });
 }
 
 function safeInit(fn, name) {
@@ -2733,6 +2734,7 @@ function initApp() {
   safeInit(initThemeToggle, 'initThemeToggle');
   safeInit(updateHeaderDate, 'updateHeaderDate');
   safeInit(initTabs, 'initTabs');
+  safeInit(initCollapsibleSections, 'initCollapsibleSections');
   safeInit(initTimer, 'initTimer');
   safeInit(initReframer, 'initReframer');
   safeInit(initPride, 'initPride');
@@ -2762,9 +2764,14 @@ function initApp() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  initSelectionGuard();
   initAuth();
   initCookieBanner();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushCloudSave(true).catch(() => {});
+  });
+  window.addEventListener('pagehide', () => {
+    flushCloudSave(true).catch(() => {});
+  });
   
   // Register Service Worker
   if ('serviceWorker' in navigator) {
@@ -2777,17 +2784,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v33-touch-selection-guard'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v34-audit-hardening'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
   }
 });
-
-// For testing purposes
-window.test_initApp = initApp;
-window.test_loadState = loadState;
-window.test_state = state;
-window.test_setCurrentUser = (u) => { currentUser = u; };
-window.test_renderReports = renderAIReportsList;
-window.test_navigate = switchTab;
