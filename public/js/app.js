@@ -1151,7 +1151,9 @@ function renderGoalNextStepsCard() {
   if (!c) return;
   const steps = goalNextSteps(state, todayStr());
   if (!steps.length) {
-    c.innerHTML = '<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><p class="card-subtitle">Crea una meta activa para convertirla en tareas de hoy.</p></div>';
+    // Sin metas activas: una invitación compacta en lugar de una tarjeta vacía.
+    c.innerHTML = '<div class="glass-card today-empty-goals"><div><strong>Conecta tu día con una meta</strong><p>Crea una meta y su siguiente paso aparecerá aquí listo para hacerlo hoy.</p></div><button class="zen-btn zen-btn-primary" id="next-steps-create-goal-btn"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Crear meta</button></div>';
+    c.querySelector('#next-steps-create-goal-btn')?.addEventListener('click', () => openSmartForm());
     return;
   }
   c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon orange"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><h2 class="card-title">Siguientes pasos de tus metas</h2></div></div><div class="goal-next-list">${steps.map(item => item.nextStep ? `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>${esc(item.nextStep)}</p></div>${item.plannedToday ? '<span class="cal-status-pill">En tu plan de hoy</span>' : `<button class="zen-btn zen-btn-primary" data-goal-today="${esc(item.id)}">Hacer hoy</button>`}</div>` : `<div class="goal-next-item"><div><strong>${esc(item.goal)}</strong><p>Define el siguiente paso para desbloquear Hoy.</p><input class="zen-input" data-next-inline="${esc(item.id)}" placeholder="Siguiente paso de esta meta"></div><button class="zen-btn zen-btn-ghost" data-save-next-inline="${esc(item.id)}">Guardar</button></div>`).join('')}</div></div>`;
@@ -2920,7 +2922,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v47-simplify-reset'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v48-hoy-order'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
