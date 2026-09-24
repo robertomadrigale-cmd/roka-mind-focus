@@ -151,3 +151,13 @@ test('goalNextSteps marks a step already planned for today', () => {
   assert.equal(goalNextSteps(state, '2026-09-23')[0].plannedToday, true);
   assert.equal(goalNextSteps(state, '2026-09-24')[0].plannedToday, false);
 });
+
+test('lowLifeAreasNeedingAction skips areas already covered or recently dismissed', async () => {
+  const { lowLifeAreasNeedingAction } = await import('../public/js/lib/system.js');
+  const base = { lifeWheel: { lifestyle: 8, contribution: 8, joy: 8, freedom: 8, mindset: 8, creativity: 8, energy: 3, production: 8, connection: 8, economy: 2 } };
+  assert.deepEqual(lowLifeAreasNeedingAction(base, { today: '2026-09-23' }).map(a => a.key), ['energy', 'economy']);
+  const covered = { ...base, smartGoals: [{ id: 'g', status: 'active', lifeArea: 'economy' }], rituals: [{ id: 'r', lifeArea: 'energy' }] };
+  assert.deepEqual(lowLifeAreasNeedingAction(covered, { today: '2026-09-23' }), []);
+  assert.deepEqual(lowLifeAreasNeedingAction(base, { today: '2026-09-23', dismissed: { economy: '2026-09-20' } }).map(a => a.key), ['energy']);
+  assert.deepEqual(lowLifeAreasNeedingAction(base, { today: '2026-10-05', dismissed: { economy: '2026-09-20' } }).map(a => a.key), ['energy', 'economy']);
+});

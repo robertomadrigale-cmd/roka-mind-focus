@@ -231,6 +231,23 @@ export function shouldPromptWeeklyReview(state, today = localDateKey(), options 
   return Boolean(lastReview) && daysSince(lastReview) > 8;
 }
 
+// Áreas bajas que aún piden acción en Hoy: se omiten las que ya tienen una meta activa
+// o un ritual vinculado, y las que el usuario descartó hace menos de 14 días.
+export function lowLifeAreasNeedingAction(state, options = {}) {
+  const data = state || {};
+  const today = toDateKey(options.today || localDateKey());
+  const dismissed = options.dismissed || {};
+  const covered = new Set([
+    ...(data.smartGoals || []).filter(isActiveGoal).map(goal => goal.lifeArea).filter(Boolean),
+    ...(data.rituals || []).map(ritual => ritual.lifeArea).filter(Boolean)
+  ]);
+  return lowLifeAreas(data, options.threshold ?? 4).filter(area => {
+    if (covered.has(area.key)) return false;
+    const since = dismissed[area.key];
+    return !since || Math.floor((dateFromKey(today) - dateFromKey(toDateKey(since))) / DAY_MS) >= 14;
+  });
+}
+
 export function lowLifeAreas(state, threshold = 4) {
   const wheel = state?.lifeWheel || {};
   return LIFE_AREA_KEYS

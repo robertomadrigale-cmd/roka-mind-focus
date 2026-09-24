@@ -4156,3 +4156,13 @@ body.light-theme .zen-btn-primary { color: #fff; }
 .today-empty-goals strong { display: block; font-size: 15px; margin-bottom: 2px; }
 .today-empty-goals p { margin: 0; font-size: 13px; color: var(--text-secondary); }
 @media (max-width: 600px) { .today-empty-goals { flex-direction: column; align-items: stretch; } }
+.today-empty-goals .zen-btn { flex-shrink: 0; white-space: nowrap; }
+
+/* Áreas bajas: una fila limpia por área, sin líneas vacías */
+.low-areas-card .card-title-group { align-items: flex-start; }
+.low-areas-card .card-subtitle { margin: 2px 0 0; font-size: 13px; }
+.low-areas-card .low-area-item:first-child { border-top: 0; padding-top: 4px; }
+.low-area-name { display: flex; align-items: center; gap: 10px; }
+.low-area-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.low-area-actions .zen-btn { white-space: nowrap; }
+.low-area-dismiss { width: 44px; padding: 0; }
