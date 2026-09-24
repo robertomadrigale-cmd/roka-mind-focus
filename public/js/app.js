@@ -1161,7 +1161,7 @@ function renderGoalNextStepsCard() {
   const steps = goalNextSteps(state, todayStr());
   if (!steps.length) {
     // Sin metas activas: una invitación compacta en lugar de una tarjeta vacía.
-    c.innerHTML = '<div class="glass-card today-empty-goals"><div><strong>Conecta tu día con una meta</strong><p>Crea una meta y su siguiente paso aparecerá aquí listo para hacerlo hoy.</p></div><button class="zen-btn zen-btn-primary" id="next-steps-create-goal-btn"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Crear meta</button></div>';
+    c.innerHTML = '<div class="glass-card today-empty-goals"><div><strong>Aún no tienes metas activas</strong><p>Define de 1 a 3 metas para los próximos 90 días. Solo se hace una vez por trimestre; cada día aquí verás su siguiente paso.</p></div><button class="zen-btn zen-btn-primary" id="next-steps-create-goal-btn"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Crear meta de 90 días</button></div>';
     c.querySelector('#next-steps-create-goal-btn')?.addEventListener('click', () => openSmartForm());
     return;
   }
@@ -2931,7 +2931,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v49-weekly-prompt'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v50-empty-goals'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
