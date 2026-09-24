@@ -9,7 +9,7 @@
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon.svg">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="css/main.css?v=47">
+  <link rel="stylesheet" href="css/main.css?v=48">
 </head>
 <body>
   <!-- ===== ICON SPRITE ===== -->
@@ -155,14 +155,13 @@
 
         <div class="hoy-layout-grid">
 
-          <!-- COLUMNA IZQUIERDA: avisos, siguientes pasos y plan del día -->
+          <!-- COLUMNA IZQUIERDA: avisos, plan del día y siguientes pasos -->
           <div class="hoy-col-left">
 
+            <!-- Avisos urgentes: solo aparecen cuando hay algo que atender -->
             <div class="today-system-stack">
               <div id="weekly-review-prompt"></div>
               <div id="overdue-tasks-card"></div>
-              <div id="goal-next-steps-card"></div>
-              <div id="low-life-areas-card"></div>
             </div>
 
             <!-- Daily Planner -->
@@ -188,6 +187,12 @@
                 <span class="planner-progress-text" id="planner-progress-text">0/0 tareas</span>
               </div>
               <div class="planner-tasks" id="planner-tasks"></div>
+            </div>
+
+            <!-- Conexión con metas: debajo del plan para no desplazarlo -->
+            <div class="today-system-stack">
+              <div id="goal-next-steps-card"></div>
+              <div id="low-life-areas-card"></div>
             </div>
           </div>
 
@@ -1028,6 +1033,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=47"></script>
+  <script type="module" src="js/app.js?v=48"></script>
 </body>
 </html>
