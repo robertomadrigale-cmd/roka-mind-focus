@@ -410,3 +410,23 @@ export function legacyToModel(legacyState = {}, now = Date.now()) {
   return stateToModel(legacyState, { now: stampedAt });
 }
 
+// ─── "Empezar de cero" — decisión de reinicio remoto ───
+// Un dispositivo guarda el último `resetAt` que conoce junto a su base de sincronización.
+// Si el documento raíz remoto trae un `resetAt` más nuevo (y distinto), significa que OTRO
+// dispositivo ejecutó "Empezar de cero": este dispositivo debe descartar su estado local y su
+// base cacheada sin subir nada, para no resucitar datos que ya fueron borrados en la nube.
+export function isRemoteResetNewer(knownResetAt, remoteResetAt) {
+  if (!remoteResetAt) return false;
+  if (remoteResetAt === knownResetAt) return false;
+  if (!knownResetAt) return true;
+  const remoteTime = Date.parse(remoteResetAt);
+  const knownTime = Date.parse(knownResetAt);
+  if (!Number.isFinite(remoteTime)) return false;
+  if (!Number.isFinite(knownTime)) return true;
+  return remoteTime > knownTime;
+}
+
+export function emptySyncModel() {
+  return { schema: 5, collections: {}, singletons: {}, counters: {}, days: {} };
+}
+

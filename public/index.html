@@ -9,7 +9,7 @@
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon.svg">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="css/main.css?v=45-sync-v5">
+  <link rel="stylesheet" href="css/main.css?v=47">
 </head>
 <body>
   <!-- ===== ICON SPRITE ===== -->
@@ -153,12 +153,6 @@
           </div>
         </div>
 
-        <!-- AI Route Button -->
-        <div class="hoy-actions-row">
-          <button class="zen-btn zen-btn-primary" id="generate-daily-route-btn">Generar ruta de hoy</button>
-          <button class="zen-btn zen-btn-ghost route-link-btn" data-route-target="ai">Ver coach IA</button>
-        </div>
-
         <div class="hoy-layout-grid">
 
           <!-- COLUMNA IZQUIERDA: avisos, siguientes pasos y plan del día -->
@@ -249,13 +243,9 @@
                 </div>
                 <div class="ambient-controls">
                   <span class="ambient-label">Respiración:</span>
-                  <button class="preset-btn pattern-btn active" data-pattern="resonance" title="Coherencia Cardíaca (5s inhala, 5s exhala)">5-5</button>
-                  <button class="preset-btn pattern-btn" data-pattern="box" title="Caja (4s inhala, 4s pausa, 4s exhala, 4s pausa)">4-4-4-4</button>
-                  <button class="preset-btn pattern-btn" data-pattern="relax" title="Relajante (4s inhala, 7s pausa, 8s exhala)">4-7-8</button>
-                  <button class="preset-btn pattern-btn" data-pattern="extended" title="Exhalación extendida (4s inhala, 6s exhala)">4-6</button>
-                  <button class="preset-btn pattern-btn" data-pattern="sigh" title="Suspiro cíclico (inhala, completa con segunda inhalación breve, exhala largo)">Suspiro</button>
-                  <button class="preset-btn pattern-btn" data-pattern="diaphragm" title="Diafragmática pausada (3s inhala, 6s exhala)">3-6</button>
-                  <button class="preset-btn pattern-btn" data-pattern="pursed" title="Labios fruncidos (2s inhala, 4s exhala)">2-4</button>
+                  <button class="preset-btn pattern-btn active" data-pattern="resonance" title="Calma: Coherencia Cardíaca (5s inhala, 5s exhala)">Calma 5-5</button>
+                  <button class="preset-btn pattern-btn" data-pattern="box" title="Enfoque: Caja (4s inhala, 4s pausa, 4s exhala, 4s pausa)">Enfoque 4-4-4-4</button>
+                  <button class="preset-btn pattern-btn" data-pattern="relax" title="Descanso: Relajante (4s inhala, 7s pausa, 8s exhala)">Descanso 4-7-8</button>
                 </div>
                 <div class="ambient-controls ambient-controls-sounds">
                   <span class="ambient-label">Ambiente:</span>
@@ -318,12 +308,6 @@
             </div>
 
           </div>
-        </div>
-
-        <!-- Motivational Quote (at the end, subtle) -->
-        <div class="quote-banner hoy-quote-banner" id="quote-banner">
-          <div class="quote-text" id="quote-text"></div>
-          <div class="quote-author" id="quote-author"></div>
         </div>
 
       </section>
@@ -390,12 +374,7 @@
             <div>
               <span class="page-eyebrow">Lecturas estructuradas</span>
               <h2>Informes que terminan en acción</h2>
-              <p>Resumen, hallazgos y un plan claro; sin bloques interminables de texto.</p>
-            </div>
-            <div class="reports-actions">
-              <button class="zen-btn zen-btn-ghost map-report-btn" data-report="personal">Mapa personal</button>
-              <button class="zen-btn zen-btn-ghost map-report-btn" data-report="steps">Siguientes pasos</button>
-              <button class="zen-btn zen-btn-primary map-report-btn" data-report="deep">Diagnóstico profundo</button>
+              <p>Pide feedback en tu revisión semanal o "Ayúdame con esta meta" en una meta SMART.</p>
             </div>
           </div>
           <div id="ai-reports-list" class="reports-list"></div>
@@ -489,8 +468,6 @@
             <div class="giants-list" id="giants-container"></div>
           </div>
         </div>
-        <div id="mind-advanced-tools" class="advanced-tools-slot mente-advanced-tools-slot"></div>
-
       </section>
 
       <!-- ================================================================ -->
@@ -508,7 +485,6 @@
 
         <div class="sub-nav-pills" role="tablist" aria-label="Secciones de Metas">
           <button class="zen-btn strat-sub-tab active" data-target="strat-quarterly" data-subtab-group="metas" data-subtab-target="strat-quarterly" data-subroute="trimestre" role="tab" aria-selected="true">Trimestre</button>
-          <button class="zen-btn strat-sub-tab" data-target="strat-year" data-subtab-group="metas" data-subtab-target="strat-year" data-subroute="anio" role="tab" aria-selected="false">Año</button>
           <button class="zen-btn strat-sub-tab" data-target="strat-vision" data-subtab-group="metas" data-subtab-target="strat-vision" data-subroute="vision" role="tab" aria-selected="false">Visión</button>
           <button class="zen-btn strat-sub-tab" data-target="strat-habits" data-subtab-group="metas" data-subtab-target="strat-habits" data-subroute="habitos" role="tab" aria-selected="false">Hábitos</button>
         </div>
@@ -555,11 +531,6 @@
           <div id="smart-goals-container"></div>
         </div>
 
-        <div class="glass-card mt-20">
-          <div class="card-header"><div class="card-title-group"><div class="card-icon orange"><svg class="icon" aria-hidden="true"><use href="#i-lightbulb"/></svg></div><h2 class="card-title">Ideas del trimestre</h2></div><button class="zen-btn zen-btn-primary" id="save-quarterly-btn">Guardar ideas</button></div>
-          <div class="quarterly-list" id="quarterly10-container"></div>
-        </div>
-
         <div class="grid-2 mt-20">
           <!-- 90-Day Stop Doing List -->
           <div class="glass-card">
@@ -573,24 +544,11 @@
         </div>
         </div>
 
-        <!-- ── Sub-tab: Año ── -->
-        <div id="strat-year" class="strat-content" data-subtab-content="metas" style="display: none;" role="tabpanel">
-        <div class="section-header">
-          <h1 class="section-title font-serif">Big 5 del Año</h1>
-          <p class="section-subtitle">Las cinco metas que hacen de este año un éxito rotundo</p>
-        </div>
-        <div class="glass-card">
-          <div class="card-header"><div class="card-title-group"><div class="card-icon orange"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></div><h2 class="card-title">Big 5 del Año</h2></div></div>
-          <p class="card-subtitle">Cada meta anual muestra cuántas metas trimestrales activas la impulsan.</p>
-          <div class="big5-list" id="annual-big5"></div>
-        </div>
-        </div>
-
-        <!-- ── Sub-tab: Visión (moved from Identity) ── -->
+        <!-- ── Sub-tab: Visión (fusiona Mi visión, 3 valores, 3 metas del año y Rueda de la Vida) ── -->
         <div id="strat-vision" class="strat-content" data-subtab-content="metas" style="display: none;" role="tabpanel">
         <div class="section-header">
           <h1 class="section-title font-serif">Visión de Vida</h1>
-          <p class="section-subtitle">Tu Big 5, valores, la persona en que te convertirás y tu Rueda de la Vida</p>
+          <p class="section-subtitle">Tu visión, tus valores, tus 3 metas del año y tu Rueda de la Vida</p>
         </div>
 
         <div class="glass-card view-mode" id="vision-card">
@@ -604,17 +562,16 @@
           <textarea class="zen-textarea ta-140" id="vision-text" placeholder="Describe tu vida ideal en 5 años..."></textarea>
         </div>
 
-        <div class="grid-2 mt-20">
-          <div class="glass-card">
-            <div class="card-header"><div class="card-title-group"><div class="card-icon green"><svg class="icon" aria-hidden="true"><use href="#i-diamond"/></svg></div><h2 class="card-title">Mis 5 Valores</h2></div></div>
-            <p class="card-subtitle">Los valores no negociables que dirigen mi vida</p>
-            <div class="big5-list" id="annual-values"></div>
-          </div>
-          <div class="glass-card">
-            <div class="card-header"><div class="card-title-group"><div class="card-icon gold"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></div><h2 class="card-title">En Quién Me Convertiré</h2></div></div>
-            <p class="card-subtitle">Las 5 identidades que debo desarrollar</p>
-            <div class="big5-list" id="annual-become"></div>
-          </div>
+        <div class="glass-card mt-20">
+          <div class="card-header"><div class="card-title-group"><div class="card-icon green"><svg class="icon" aria-hidden="true"><use href="#i-diamond"/></svg></div><h2 class="card-title">Mis 3 Valores</h2></div></div>
+          <p class="card-subtitle">Los valores no negociables que dirigen mi vida</p>
+          <div class="big5-list" id="annual-values"></div>
+        </div>
+
+        <div class="glass-card mt-20">
+          <div class="card-header"><div class="card-title-group"><div class="card-icon orange"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></div><h2 class="card-title">Mis 3 Metas del Año</h2></div></div>
+          <p class="card-subtitle">Cada meta del año muestra cuántas metas trimestrales activas la impulsan.</p>
+          <div class="big5-list" id="annual-big5"></div>
         </div>
 
         <div class="glass-card mt-20">
@@ -681,16 +638,6 @@
               <!-- Assessment rows renderizadas desde JS -->
             </div>
         </details>
-        <div class="progress-badges-panel mt-20">
-          <div class="progress-badges-heading">
-            <div>
-              <span class="page-eyebrow">Constancia visible</span>
-              <h2>Logros desbloqueados</h2>
-            </div>
-            <div id="profile-xp-total" class="xp-total">0 XP</div>
-          </div>
-          <div class="badges-grid" id="badges-container"></div>
-        </div>
         <div class="grid-2 mt-20">
           <div class="glass-card">
             <div class="card-header"><div class="card-title-group"><div class="card-icon green"><svg class="icon" aria-hidden="true"><use href="#i-trending-up"/></svg></div><h2 class="card-title">Actividad de 30 días</h2></div></div>
@@ -796,7 +743,6 @@
             <button class="zen-btn zen-btn-ghost" id="cal-next">Siguiente <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
           </div>
           <div class="calendar-legend">
-            <span class="legend-item"><span class="legend-dot legend-dot-green"></span> Victorias</span>
             <span class="legend-item"><span class="legend-dot legend-dot-gold"></span> Orgullos</span>
             <span class="legend-item"><span class="legend-dot legend-dot-orange"></span> Creencias</span>
             <span class="legend-item"><span class="legend-dot legend-dot-blue"></span> Tareas</span>
@@ -865,22 +811,6 @@
                 <textarea id="profile-life-history" class="zen-textarea ta-120" placeholder="Escribe aquí tu historia completa: infancia, mayores logros, eventos que te marcaron... (Esto ayuda a la IA a conocerte profundamente)"></textarea>
               </div>
 
-              <div class="grid-2">
-                <div class="smart-field">
-                  <label class="smart-label">Fecha de Nacimiento</label>
-                  <input type="date" id="profile-birth-date" class="zen-input">
-                </div>
-                <div class="smart-field">
-                  <label class="smart-label">Hora (Aprox.)</label>
-                  <input type="time" id="profile-birth-time" class="zen-input">
-                </div>
-              </div>
-              
-              <div class="smart-field">
-                <label class="smart-label">Lugar de Nacimiento</label>
-                <input type="text" id="profile-birth-place" class="zen-input" placeholder="Ciudad, País">
-              </div>
-              
               <button class="zen-btn zen-btn-primary w-100" id="save-profile-btn" hidden>Guardar Configuración</button>
             </div>
 
@@ -891,7 +821,6 @@
                 <p>Decide qué información puede usar la IA y el estilo de respuesta que prefieres.</p>
                 <label class="profile-setting-row"><span>Usar metas y progreso</span><input type="checkbox" id="profile-context-core" checked></label>
                 <label class="profile-setting-row"><span>Usar historia y bloqueos sensibles</span><input type="checkbox" id="profile-context-sensitive"></label>
-                <label class="profile-setting-row"><span>Herramientas avanzadas</span><input type="checkbox" id="profile-advanced-tools"></label>
                 <label class="profile-setting-field" for="profile-coach-style">Estilo de acompañamiento</label>
                 <select id="profile-coach-style" class="zen-input">
                   <option value="direct">Directo y práctico</option>
@@ -957,6 +886,7 @@
                   <button class="zen-btn zen-btn-ghost" id="export-data-btn">Descargar mis datos</button>
                   <button class="zen-btn zen-btn-ghost" id="open-advanced-settings-btn">Ajustes avanzados</button>
                 </div>
+                <button class="zen-btn zen-btn-danger-soft w-100" id="start-from-zero-btn">Empezar de cero</button>
                 <p class="profile-legal-links"><a href="privacidad.html">Privacidad</a><span>·</span><a href="terminos.html">Términos</a></p>
               </div>
               <div class="profile-settings-panel profile-theme-panel">
@@ -968,39 +898,6 @@
             </div>
           </div>
         </div>
-
-        <div class="profile-assessments-section">
-          <div class="section-heading-row">
-            <div>
-              <span class="page-eyebrow">Opcional y no clínico</span>
-              <h2>Conócete mejor</h2>
-              <p>Estas evaluaciones ayudan a personalizar el lenguaje del Coach; no sustituyen una evaluación profesional.</p>
-            </div>
-          </div>
-          <div class="ai-assessments-grid">
-            <div class="ai-assessment-card" data-test="archetype">
-              <div class="assessment-card-top"><div class="assessment-icon archetype"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><div class="assessment-status" id="archetype-status">Pendiente</div></div>
-              <h3 class="assessment-title">Arquetipo mental</h3><p class="assessment-desc">Reconoce tu patrón dominante de pensamiento.</p>
-              <div class="quiz-stack" id="archetype-quiz"></div><div class="diagnosis-result" id="archetype-result"></div>
-              <button class="ai-action-btn small primary" id="save-archetype-test-btn">Calcular arquetipo</button>
-            </div>
-            <div class="ai-assessment-card" data-test="enneagram">
-              <div class="assessment-card-top"><div class="assessment-icon enneagram"><svg class="icon" aria-hidden="true"><use href="#i-circle-dot"/></svg></div><div class="assessment-status" id="enneagram-status">Pendiente</div></div>
-              <h3 class="assessment-title">Eneagrama</h3><p class="assessment-desc">Explora motivaciones y formas habituales de reaccionar.</p>
-              <div class="quiz-stack" id="enneagram-quiz"></div><div class="diagnosis-result" id="enneagram-result"></div>
-              <button class="ai-action-btn small primary" id="save-enneagram-test-btn">Calcular eneagrama</button>
-            </div>
-            <div class="ai-assessment-card" data-test="productivity">
-              <div class="assessment-card-top"><div class="assessment-icon productivity"><svg class="icon" aria-hidden="true"><use href="#i-trending-up"/></svg></div><div class="assessment-status" id="productivity-status">Pendiente</div></div>
-              <h3 class="assessment-title">Perfil productivo</h3><p class="assessment-desc">Identifica cómo ejecutas, profundizas y te recuperas.</p>
-              <div class="quiz-stack" id="productivity-quiz"></div><div class="diagnosis-result" id="productivity-result"></div>
-              <button class="ai-action-btn small primary" id="save-productivity-test-btn">Calcular perfil</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Hidden div to keep identity-annual sub-content class for JS compat -->
-        <div id="identity-annual" class="identity-sub-content" style="display:none;"></div>
 
       </section>
 
@@ -1015,23 +912,14 @@
       <button class="bottom-nav-item" data-tab="coach" data-route="coach"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 14.5a3.5 3.5 0 0 1-3.5 3.5H9l-5 3.5V7.5A3.5 3.5 0 0 1 7.5 4h10A3.5 3.5 0 0 1 21 7.5Z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg><span>Coach</span></button>
     </nav>
 
-    <button class="coach-fab" id="coach-fab" aria-label="Abrir Coach" title="Hablar con el Coach" hidden>
-      <span class="coach-fab-mark">R</span><span class="coach-fab-label">Coach</span>
-    </button>
-
     <div class="sr-only" aria-hidden="true">
       <div id="active-mantra-display"></div>
       <ul id="active-vision-display"></ul>
-      <button id="ai-daily-route-btn"></button>
-      <button id="ai-weekly-review-btn"></button>
-      <div id="diagnosis-summary"></div>
       <div id="journey-completion-score"></div>
       <div id="journey-meter-fill"></div>
       <div id="journey-next-action"></div>
       <div id="journey-steps"></div>
       <div id="ai-readiness"></div>
-      <div id="user-level-display"></div>
-      <div id="xp-fill"></div>
     </div>
 
     <!-- Toast -->
@@ -1116,6 +1004,30 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=45"></script>
+  <!-- ===== EMPEZAR DE CERO — MODAL DE CONFIRMACIÓN ===== -->
+  <div id="reset-modal" class="auth-overlay" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+    <div class="auth-card ai-settings-card">
+      <div class="ai-settings-header-row">
+        <div class="coach-mark">R</div>
+        <div>
+          <h2 class="card-title no-margin" id="reset-modal-title">Empezar de cero</h2>
+          <p class="settings-security-note tight-top">Esta acción no se puede deshacer.</p>
+        </div>
+      </div>
+      <p>Se descargará automáticamente una copia de tus datos y luego se borrará: tus metas, rituales, tareas, creencias, mantras, conversaciones e informes del Coach, tanto en este dispositivo como en la nube.</p>
+      <p><strong>Se conserva:</strong> tu sesión de cuenta, tu API key de IA, el tema elegido y tus recordatorios. Los respaldos de migración (inmutables) tampoco se borran.</p>
+      <p>Si usas ROKA en otro dispositivo, sus datos también se reiniciarán la próxima vez que se conecte.</p>
+      <div class="smart-field">
+        <label class="smart-label" for="reset-confirm-input">Escribe BORRAR para confirmar</label>
+        <input id="reset-confirm-input" class="zen-input" autocomplete="off" placeholder="BORRAR">
+      </div>
+      <div class="ai-key-actions">
+        <button class="zen-btn zen-btn-ghost" id="reset-cancel-btn">Cancelar</button>
+        <button class="zen-btn zen-btn-danger-soft" id="reset-confirm-btn" disabled>Empezar de cero</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js?v=47"></script>
 </body>
 </html>

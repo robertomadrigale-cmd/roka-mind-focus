@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v45-reminders';
+const CACHE_NAME = 'roka-mind-v47-simplify-reset';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;

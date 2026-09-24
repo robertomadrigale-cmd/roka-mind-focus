@@ -23,30 +23,6 @@ const BREATHING_PATTERNS = {
       { ms: 4000, text: 'Mantén...' },
       { ms: 11000, text: 'Exhala largo...' }
     ]
-  },
-  extended: {
-    className: 'pattern-extended',
-    cycleTime: 10000,
-    steps: [{ ms: 0, text: 'Inhala por nariz...' }, { ms: 4000, text: 'Exhala más largo...' }]
-  },
-  sigh: {
-    className: 'pattern-sigh',
-    cycleTime: 9000,
-    steps: [
-      { ms: 0, text: 'Inhala...' },
-      { ms: 1800, text: 'Completa un poco más...' },
-      { ms: 3000, text: 'Suelta largo...' }
-    ]
-  },
-  diaphragm: {
-    className: 'pattern-diaphragm',
-    cycleTime: 9000,
-    steps: [{ ms: 0, text: 'Expande abdomen...' }, { ms: 3000, text: 'Exhala sin prisa...' }]
-  },
-  pursed: {
-    className: 'pattern-pursed',
-    cycleTime: 6000,
-    steps: [{ ms: 0, text: 'Inhala nariz...' }, { ms: 2000, text: 'Exhala labios suaves...' }]
   }
 };
 const BREATHING_PATTERN_CLASSES = Object.values(BREATHING_PATTERNS).map(pattern => pattern.className);

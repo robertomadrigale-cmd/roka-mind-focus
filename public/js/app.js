@@ -9,7 +9,7 @@ import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, migra
 import { callAIGateway } from "./services/aiGateway.js?v=10.10";
 import { WEEK_DAYS, buildRemindersICS, dueReminder, markReminderShown, normalizeReminders } from "./lib/reminders.js?v=45";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
-import { clearSyncBase, hasPendingChanges, pushChanges, startSync, stopSync } from "./services/syncService.js?v=41-sync-v5";
+import { clearSyncBase, hasPendingChanges, pushChanges, resetCloudData, startSync, stopSync } from "./services/syncService.js?v=43-reset";
 
 // ==========================================
 // ROKA MIND FOCUS — Application Core v2.0
@@ -41,20 +41,11 @@ const DEFAULT_STATE = {
   pendingCloudSync: false,
   beliefs: [], mantras: [], victories: [], prideLogs: [], gratitudeLogs: [],
   smartGoals: [], rituals: [], circleOfGiants: [],
-  userProfile: { name: '', archetype: '', vision: '', fears: '', values: '', learning: '', lifeHistory: '', enneagram: '', birthDate: '', birthTime: '', birthPlace: '' },
+  userProfile: { name: '', vision: '', fears: '', values: '', lifeHistory: '' },
   aiConfig: { prompt: '' },
   coachPreferences: { style: 'direct', useCoreContext: true, useSensitiveContext: false },
   aiReports: [],
   reportsMigrated: false,
-  personalMap: {
-    archetypeAnswers: {},
-    enneagramAnswers: {},
-    productivityAnswers: {},
-    archetype: '',
-    enneagram: '',
-    productivity: '',
-    summary: ''
-  },
   gamification: { xp: 0, level: 1, badges: [] },
   lifeWheel: { lifestyle:5,contribution:5,joy:5,freedom:5,mindset:5,creativity:5,energy:5,production:5,connection:5,economy:5 },
   annualBig5: ['','','','',''], values5: ['','','','',''], mustBecome5: ['','','','',''],
@@ -62,7 +53,7 @@ const DEFAULT_STATE = {
   weeklyReflection: { well:'', adjust:'' },
   weeklyReviews: [],
   weekFocus: { weekKey: '', goalIds: [] },
-  settings: { advancedTools: false },
+  settings: {},
   learning: { book:'', course:'', conference:'', mastermind:'' },
   visionText: '',
   sectionDates: { weekly:'', learning:'', stopDoing:'', quarterly:'', annual:'' },
@@ -150,8 +141,6 @@ function normalizeState() {
     if (!ritual.days) ritual.days = { lun:false, mar:false, mie:false, jue:false, vie:false, sab:false, dom:false };
   });
   if (!state.smartGoals) state.smartGoals = [];
-  if (!state.personalMap) state.personalMap = JSON.parse(JSON.stringify(DEFAULT_STATE.personalMap));
-  state.personalMap = deepMerge(DEFAULT_STATE.personalMap, state.personalMap);
   if (!state.aiReports) state.aiReports = [];
   if (!state.userProfile) state.userProfile = JSON.parse(JSON.stringify(DEFAULT_STATE.userProfile));
   if (!state.aiConfig) state.aiConfig = JSON.parse(JSON.stringify(DEFAULT_STATE.aiConfig));
@@ -230,6 +219,16 @@ function getExportState() {
   return payload;
 }
 
+function downloadExportData() {
+  const payload = JSON.stringify(getExportState(), null, 2);
+  const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `roka-datos-${todayStr()}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function loadLocalState() {
   const localData = getLocalCandidateForCurrentUser();
   state = deepMerge(DEFAULT_STATE, localData);
@@ -306,12 +305,35 @@ async function startCloudSync() {
         persistLocalState();
         renderAll();
       },
-      onRemoteChange
+      onRemoteChange,
+      onReset: onRemoteReset
     });
   } catch (error) {
     console.warn('No se pudo sincronizar Firebase al inicio; la app queda usable con datos locales.', error);
     updateAccountSyncStatus(state.pendingCloudSync ? 'pending' : 'synced');
   }
+}
+
+// Otro dispositivo ejecutó "Empezar de cero": este dispositivo descarta su estado local y su
+// base cacheada (syncService ya lo hizo, sin subir nada) y arranca desde el estado vacío.
+function onRemoteReset() {
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = null;
+  pendingCloudSavePromise = null;
+  clearTimeout(remoteRenderTimer);
+  remoteRenderTimer = null;
+  const keptReminders = JSON.parse(JSON.stringify(getReminders()));
+  state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  state.settings.reminders = keptReminders;
+  state.onboarding = { status: 'not_started', completedAt: '', step: 0 };
+  coachThreads = [];
+  activeCoachThreadId = '';
+  activeCoachMessages = [];
+  reportCache = [];
+  persistLocalState();
+  if (appInitialized) renderAll();
+  updateAccountSyncStatus('synced');
+  showToast('Tus datos se reiniciaron desde otro dispositivo');
 }
 
 async function saveState(quiet = false) {
@@ -518,6 +540,85 @@ function clearLocalSession({ render = true } = {}) {
   if (render && appInitialized) renderAll();
 }
 
+// ─── EMPEZAR DE CERO (Perfil → Privacidad y datos) ───
+// Ver docs/PLAN-SIMPLIFICACION.md §D. Borra la nube (sync/*, days/*, chatThreads/* con sus
+// mensajes, reports/*) y reemplaza el documento raíz SIN merge. Conserva: sesión, API key de IA,
+// tema elegido, y vuelve a escribir settings.reminders tras el reinicio. Los respaldos de
+// migración (users/{uid}/backups/*) son inmutables por reglas y no se tocan.
+function openResetModal() {
+  const modal = $('#reset-modal');
+  if (!modal) return;
+  const input = $('#reset-confirm-input');
+  const confirmBtn = $('#reset-confirm-btn');
+  if (input) input.value = '';
+  if (confirmBtn) confirmBtn.disabled = true;
+  modal.style.display = 'flex';
+}
+
+function closeResetModal() {
+  const modal = $('#reset-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function initResetModal() {
+  const input = $('#reset-confirm-input');
+  const confirmBtn = $('#reset-confirm-btn');
+  input?.addEventListener('input', () => {
+    if (confirmBtn) confirmBtn.disabled = input.value.trim().toUpperCase() !== 'BORRAR';
+  });
+  $('#reset-cancel-btn')?.addEventListener('click', closeResetModal);
+  confirmBtn?.addEventListener('click', () => {
+    if (input?.value.trim().toUpperCase() !== 'BORRAR') return;
+    performStartFromZero();
+  });
+}
+
+async function performStartFromZero() {
+  if (!currentUser) return;
+  const confirmBtn = $('#reset-confirm-btn');
+  if (confirmBtn) confirmBtn.disabled = true;
+  showToast('Preparando tu copia de datos...');
+  downloadExportData();
+  const keptReminders = JSON.parse(JSON.stringify(getReminders()));
+
+  // Se cancela cualquier push pendiente y el debounce antes de borrar, para evitar que un
+  // guardado en curso resucite datos justo después del borrado.
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = null;
+  pendingCloudSavePromise = null;
+  clearTimeout(remoteRenderTimer);
+  remoteRenderTimer = null;
+  remoteDirtyView = null;
+
+  try {
+    showToast('Borrando tus datos en la nube...');
+    await resetCloudData();
+  } catch (error) {
+    console.error('No se pudo completar el reinicio en la nube.', error);
+    showToast('No se pudo borrar la nube: ' + (error.message || error));
+    if (confirmBtn) confirmBtn.disabled = false;
+    return;
+  }
+
+  stopSync({ keepBase: true });
+  clearTimeout(remoteRenderTimer);
+  remoteRenderTimer = null;
+  localStorage.removeItem(STORAGE_KEY);
+  state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  state.settings.reminders = keptReminders;
+  state.onboarding = { status: 'not_started', completedAt: '', step: 0 };
+  coachThreads = [];
+  activeCoachThreadId = '';
+  activeCoachMessages = [];
+  reportCache = [];
+  persistLocalState();
+  closeResetModal();
+  renderAll();
+  showToast('Tus datos se reiniciaron');
+  await startCloudSync();
+  applyFirstRunDefaultsIfNeeded();
+}
+
 // ─── AUTHENTICATION ───
 function initAuth() {
   setPersistence(auth, browserLocalPersistence).catch(error => {
@@ -623,87 +724,6 @@ function initAuth() {
   }
 }
 
-// ─── MOTIVATIONAL QUOTES ───
-const QUOTES = [
-  { text: "No te rindas nunca. Abre tu corazón y tu mente y verás que llegas a donde quieres llegar.", author: "Roberto Iván Madrigal Espinoza" },
-  { text: "El único límite para nuestra realización de mañana serán nuestras dudas de hoy.", author: "Franklin D. Roosevelt" },
-  { text: "Soy muy seguro de mí mismo. Me he demostrado toda mi vida que soy seguro y confiable.", author: "Tu Mantra Personal" },
-  { text: "La disciplina es el puente entre las metas y los logros.", author: "Jim Rohn" },
-  { text: "Tu mente es un jardín, tus pensamientos son las semillas. Puedes cultivar flores o maleza.", author: "Robin Sharma" },
-  { text: "Creo mucho en mí. Por primera vez sé que soy capaz de muchas cosas.", author: "Tu Claridad Mental" },
-  { text: "El éxito no es definitivo, el fracaso no es fatal: lo que cuenta es el coraje de continuar.", author: "Winston Churchill" },
-  { text: "Me quiero mucho y confío en mí como hombre sano e inteligente que soy.", author: "Tu Verdad Interior" },
-  { text: "Los campeones no se hacen en los gimnasios. Se hacen de algo que llevan muy dentro.", author: "Muhammad Ali" },
-  { text: "Cada mañana nacemos de nuevo. Lo que hacemos hoy es lo que más importa.", author: "Buda" },
-  { text: "La mejor inversión que puedes hacer es en ti mismo.", author: "Warren Buffett" },
-  { text: "Busca adentro de tu corazón. Ahí está la respuesta.", author: "Tu Sabiduría Interior" }
-];
-
-function renderQuote() {
-  const idx = Math.floor((Date.now()/86400000)) % QUOTES.length;
-  const q = QUOTES[idx];
-  $('#quote-text').textContent = `"${q.text}"`;
-  $('#quote-author').textContent = `— ${q.author}`;
-}
-
-// ─── GAMIFICATION ───
-const LEVELS = [0, 100, 250, 500, 1000, 2000, 3500, 5000, 7500, 10000];
-const BADGES = [
-  { id: 'first_blood', name: 'Primer Paso', icon: 'I', desc: 'Ganaste tus primeros XP' },
-  { id: 'focus_master', name: 'Mente Láser', icon: 'F', desc: 'Completaste una sesión de foco' },
-  { id: 'grateful', name: 'Corazón Agradecido', icon: 'G', desc: 'Registraste gratitud' },
-  { id: 'zen_master', name: 'Maestro Zen', icon: 'Z', desc: 'Alcanzaste el Nivel 5' }
-];
-
-function addXP(amount, reason) {
-  if (!state.gamification) state.gamification = { xp: 0, level: 1, badges: [] };
-  state.gamification.xp += amount;
-  let newLevel = 1;
-  for (let i = 0; i < LEVELS.length; i++) {
-    if (state.gamification.xp >= LEVELS[i]) newLevel = i + 1;
-  }
-  if (newLevel > state.gamification.level) {
-    state.gamification.level = newLevel;
-    showToast(`Subiste de nivel. Eres Nivel ${newLevel}`);
-  } else {
-    showToast(`+${amount} XP: ${reason}`);
-  }
-  checkBadges();
-  saveState();
-  updateXPDisplay();
-  if ($('#tab-identity') && $('#tab-identity').classList.contains('active')) renderProfile();
-}
-
-function updateXPDisplay() {
-  if (!state.gamification) return;
-  const xp = state.gamification.xp;
-  const level = state.gamification.level;
-  
-  $$('#user-level-display').forEach(el => el.textContent = `Nvl ${level}`);
-  
-  const currentLevelXP = LEVELS[level - 1] || 0;
-  const nextLevelXP = LEVELS[level] || (currentLevelXP + 1000);
-  const progress = Math.min(100, Math.max(0, ((xp - currentLevelXP) / (nextLevelXP - currentLevelXP)) * 100));
-  
-  $$('#xp-fill').forEach(el => el.style.width = `${progress}%`);
-}
-
-function checkBadges() {
-  if (!state.gamification.badges) state.gamification.badges = [];
-  const b = state.gamification.badges;
-  const xp = state.gamification.xp;
-  
-  if (xp >= 50 && !b.includes('first_blood')) unlockBadge('first_blood');
-  if (state.gamification.level >= 5 && !b.includes('zen_master')) unlockBadge('zen_master');
-  if (state.gratitudeLogs && state.gratitudeLogs.length > 0 && !b.includes('grateful')) unlockBadge('grateful');
-}
-
-function unlockBadge(id) {
-  state.gamification.badges.push(id);
-  const badgeDef = BADGES.find(x => x.id === id);
-  if (badgeDef) showToast(`Insignia desbloqueada: ${badgeDef.name}`);
-}
-
 // ─── TAB NAVIGATION ───
 const ROUTES = {
   hoy: { section: 'daily', label: 'Hoy' },
@@ -731,7 +751,8 @@ function activateHashSubroute(route) {
     showCoachView(subroute === 'informes' ? 'reports' : 'chat', false);
   }
   if (route === 'metas' && subroute) {
-    const map = { trimestre: 'strat-quarterly', anio: 'strat-year', vision: 'strat-vision', habitos: 'strat-habits' };
+    // Alias: la antigua sub-ruta "año" ahora vive fusionada dentro de "Visión".
+    const map = { trimestre: 'strat-quarterly', anio: 'strat-vision', vision: 'strat-vision', habitos: 'strat-habits' };
     activateSubtab('metas', map[subroute] || map.trimestre, false);
   }
   if (route === 'semana' && subroute) {
@@ -762,14 +783,6 @@ function initTabs() {
       switchTab(b.dataset.route || b.dataset.tab, { focus: true });
     });
   });
-  $$('.route-link-btn').forEach(b => {
-    b.addEventListener('click', () => {
-      const target = b.dataset.routeTarget;
-      switchTab(target === 'ai' ? 'coach' : target, { focus: true });
-    });
-  });
-  if ($('#generate-daily-route-btn')) $('#generate-daily-route-btn').addEventListener('click', generateDailyAIRoute);
-  $('#coach-fab')?.addEventListener('click', () => switchTab('coach', { focus: true }));
   $('#profile-avatar-btn')?.addEventListener('click', () => switchTab('perfil', { focus: true }));
   window.addEventListener('hashchange', () => switchTab(routeFromHash(), { updateHash: false }));
 
@@ -914,8 +927,7 @@ function initTimer() {
       if (!state.focusLog) state.focusLog = {};
       state.focusLog[today] = (state.focusLog[today] || 0) + 1;
       logActivity(today);
-      if(!state.gamification.badges.includes('focus_master')) unlockBadge('focus_master');
-      addXP(50, 'Sesión de Foco');
+      calcStreak();
     }
   });
   timerComponent.init();
@@ -956,7 +968,7 @@ function saveReframe() {
   saveState(); logActivity(todayStr());
   $('#belief-input').value='';$('#reframe-input').value='';$('#reframe-area').classList.remove('visible');
   const ba=$('#belief-area');ba.style.display='';ba.style.opacity='1';ba.style.transform='';
-  addXP(30, 'Creencia reconfigurada'); renderMantras(); renderBeliefsLibrary(); calcStreak();
+  renderMantras(); renderBeliefsLibrary(); calcStreak();
 }
 
 // ─── MANTRAS ───
@@ -1028,250 +1040,13 @@ function openSlide() { if(!state.mantras.length){showToast('No tienes mantras');
 function showSlide() { const t=$('#mantra-slide-text'),c=$('#mantra-slide-counter'); t.style.animation='none';t.offsetHeight;t.style.animation='manthaFadeIn 2s ease forwards'; t.textContent=`"${state.mantras[slideIdx].text}"`; c.textContent=`${slideIdx+1} / ${state.mantras.length}`; c.style.cssText='margin-top:32px;font-size:0.75rem;color:var(--text-muted);letter-spacing:2px;'; }
 function closeSlide() { $('#mantra-slide-overlay').style.display='none'; if(slideInt)clearInterval(slideInt); slideInt=null; }
 
-// ─── PERSONAL MAP / DIAGNOSIS ───
-
-const ARCHETYPE_QUESTIONS = [
-  {
-    id: 'crisis',
-    question: 'Frente a una crisis profunda, tu primer impulso subconsciente es:',
-    options: [
-      { value: 'creator', label: 'Imaginar una solución radicalmente nueva y reconstruir desde cero.' },
-      { value: 'sage', label: 'Aislarme para analizar la estructura del problema y entender su raíz lógica.' },
-      { value: 'hero', label: 'Asumir la carga, resistir la presión extrema y liderar mediante disciplina pura.' },
-      { value: 'explorer', label: 'Buscar vías de escape o alternativas inexploradas fuera de la norma.' },
-      { value: 'ruler', label: 'Imponer orden autoritario, delegar roles y estabilizar el sistema de inmediato.' }
-    ]
-  },
-  {
-    id: 'shadow',
-    question: 'La mayor sombra o miedo que sabotea tu crecimiento suele ser:',
-    options: [
-      { value: 'creator', label: 'Sentir que mis obras son mediocres, derivadas o carentes de alma.' },
-      { value: 'sage', label: 'Actuar desde la ignorancia, la impulsividad o la desinformación.' },
-      { value: 'hero', label: 'Rendirme, mostrar vulnerabilidad o fallar a quienes dependen de mí.' },
-      { value: 'explorer', label: 'Quedarme atrapado en una rutina predecible que asfixie mi libertad.' },
-      { value: 'ruler', label: 'Perder el control del entorno o que el caos destruya lo que he construido.' }
-    ]
-  },
-  {
-    id: 'flow',
-    question: 'Alcanzas tu estado de "flow" (fluidez absoluta) cuando:',
-    options: [
-      { value: 'creator', label: 'Estoy traduciendo mi mundo interior en algo tangible y estético.' },
-      { value: 'sage', label: 'Conecto conceptos complejos y descubro verdades sistémicas ocultas.' },
-      { value: 'hero', label: 'Atravieso la fricción y supero mis propios límites físicos o mentales.' },
-      { value: 'explorer', label: 'Me expongo a lo desconocido, sin un mapa predefinido.' },
-      { value: 'ruler', label: 'Orquesto recursos y personas para materializar una visión a gran escala.' }
-    ]
-  },
-  {
-    id: 'legacy',
-    question: 'Si tuvieras que elegir tu legado definitivo, sería:',
-    options: [
-      { value: 'creator', label: 'Una obra de arte, producto o invención que cambie la cultura.' },
-      { value: 'sage', label: 'Un sistema de pensamiento o teoría que eleve la consciencia colectiva.' },
-      { value: 'hero', label: 'El ejemplo de un espíritu inquebrantable que inspiró a otros a no rendirse.' },
-      { value: 'explorer', label: 'Abrir caminos y descubrir territorios que otros temían pisar.' },
-      { value: 'ruler', label: 'Un imperio, empresa o estructura autosustentable que perdure en el tiempo.' }
-    ]
-  },
-  {
-    id: 'conflict',
-    question: 'En un conflicto interpersonal crítico, tu arma principal es:',
-    options: [
-      { value: 'creator', label: 'Rediseñar las reglas del juego para hacer el conflicto irrelevante.' },
-      { value: 'sage', label: 'Desarticular los argumentos del otro con lógica irrefutable y objetividad.' },
-      { value: 'hero', label: 'Afrontarlo de frente, soportar el embate y exigir resolución directa.' },
-      { value: 'explorer', label: 'Desvincularme emocionalmente y cambiar de entorno si no tiene sentido.' },
-      { value: 'ruler', label: 'Usar mi influencia, jerarquía o recursos para forzar un acuerdo estructural.' }
-    ]
-  }
-];
-
-const ENNEAGRAM_QUESTIONS = [
-  ['1', 'El Reformador: Siento una tensión constante entre la perfección ideal y la realidad; el error (ajeno o propio) me resulta físicamente incómodo.'],
-  ['2', 'El Ayudador: Mi valor personal está secretamente ligado a cuán indispensable soy para los demás; sufro cuando no reconocen mi sacrificio.'],
-  ['3', 'El Triunfador: Evalúo mi valía a través de métricas de éxito y eficiencia; me aterra el fracaso o ser percibido como irrelevante.'],
-  ['4', 'El Individualista: Siento una melancolía subyacente y necesito profunda autenticidad; odio lo ordinario y temo ser uno más del montón.'],
-  ['5', 'El Investigador: Mi energía es limitada; tiendo a aislarme en mi mente para acumular conocimiento y evitar que el mundo drene mis recursos.'],
-  ['6', 'El Leal: Mi mente escanea constantemente el horizonte buscando amenazas; la duda y la necesidad de certezas gobiernan mis decisiones.'],
-  ['7', 'El Entusiasta: Huyo del dolor emocional o el aburrimiento llenando mi agenda de estímulos, planes futuros y múltiples opciones.'],
-  ['8', 'El Desafiador: El mundo se divide entre fuertes y débiles; mi instinto primario es tomar el control absoluto para no ser dominado ni traicionado.'],
-  ['9', 'El Pacificador: Minimizo mis propios deseos y me fusiono con el entorno para evitar la fricción; el conflicto abierto me drena y paraliza.']
-];
-
-const PRODUCTIVITY_QUESTIONS = [
-  ['visual', 'Pensamiento Visual: Necesito exteriorizar mis ideas en lienzos, pizarras o diagramas; mi mente se ahoga en listas de texto plano.'],
-  ['analytical', 'Ejecución Analítica: Mi progreso depende de desfragmentar metas en sistemas algorítmicos, métricas frías y secuencias inquebrantables.'],
-  ['kinesthetic', 'Tracción Kinestésica: Pienso mientras actúo. El "parálisis por análisis" me destruye; necesito ensuciarme las manos e iterar en movimiento.'],
-  ['relational', 'Impulso Relacional: Mi disciplina se fractura en aislamiento. Necesito espejos sociales, mentores o presión externa para sostener el momentum.'],
-  ['ritual', 'Anclaje Ritualista: Mi poder reside en la repetición implacable. Prefiero un horario sagrado y metódico sobre ráfagas erráticas de inspiración.']
-];
-
-const ARCHETYPE_LABELS = {
-  creator: 'Creador',
-  sage: 'Sabio',
-  hero: 'Héroe',
-  explorer: 'Explorador',
-  ruler: 'Gobernante'
-};
-
-const PRODUCTIVITY_LABELS = {
-  visual: 'Visual',
-  analytical: 'Analítico',
-  kinesthetic: 'Práctico',
-  relational: 'Relacional',
-  ritual: 'Ritualista'
-};
-
-function initPersonalMap() {
-  if ($('#save-archetype-test-btn')) $('#save-archetype-test-btn').addEventListener('click', saveArchetypeTest);
-  if ($('#save-enneagram-test-btn')) $('#save-enneagram-test-btn').addEventListener('click', saveEnneagramTest);
-  if ($('#save-productivity-test-btn')) $('#save-productivity-test-btn').addEventListener('click', saveProductivityTest);
-  if ($('#ai-daily-route-btn')) $('#ai-daily-route-btn').addEventListener('click', generateDailyAIRoute);
-  if ($('#ai-weekly-review-btn')) $('#ai-weekly-review-btn').addEventListener('click', generateWeeklyReview);
-  $$('.map-report-btn').forEach(btn => btn.addEventListener('click', () => generateMapReport(btn.dataset.report)));
-}
-
-function renderPersonalMap() {
-  renderArchetypeQuiz();
-  renderEnneagramQuiz();
-  renderProductivityQuiz();
-  renderDiagnosisResults();
-  updateStatusIndicators();
-  renderAIReportsList();
-}
-
-function renderArchetypeQuiz() {
-  const c = $('#archetype-quiz'); if(!c) return;
-  const answers = state.personalMap.archetypeAnswers || {};
-  c.innerHTML = ARCHETYPE_QUESTIONS.map((q) => `
-    <div class="quiz-question">
-      <label>${q.question}</label>
-      <select class="zen-input" data-archetype-q="${q.id}">
-        <option value="">Seleccionar respuesta...</option>
-        ${q.options.map((opt) => `<option value="${opt.value}" ${answers[q.id]===opt.value?'selected':''}>${opt.label}</option>`).join('')}
-      </select>
-    </div>
-  `).join('');
-}
-
-function renderEnneagramQuiz() {
-  const c = $('#enneagram-quiz'); if(!c) return;
-  const answers = state.personalMap.enneagramAnswers || {};
-  c.innerHTML = ENNEAGRAM_QUESTIONS.map(([type, question]) => `
-    <div class="quiz-question range-question">
-      <label>${question}</label>
-      <div class="range-row">
-        <span>Bajo</span>
-        <input type="range" min="1" max="5" value="${answers[type] || 3}" data-enneagram-q="${type}">
-        <strong>${answers[type] || 3}</strong>
-      </div>
-    </div>
-  `).join('');
-  c.querySelectorAll('[data-enneagram-q]').forEach(input => input.addEventListener('input', () => {
-    input.parentElement.querySelector('strong').textContent = input.value;
-  }));
-}
-
-function renderProductivityQuiz() {
-  const c = $('#productivity-quiz'); if(!c) return;
-  const answers = state.personalMap.productivityAnswers || {};
-  c.innerHTML = PRODUCTIVITY_QUESTIONS.map(([type, question]) => `
-    <div class="quiz-question range-question">
-      <label>${question}</label>
-      <div class="range-row">
-        <span>Bajo</span>
-        <input type="range" min="1" max="5" value="${answers[type] || 3}" data-productivity-q="${type}">
-        <strong>${answers[type] || 3}</strong>
-      </div>
-    </div>
-  `).join('');
-  c.querySelectorAll('[data-productivity-q]').forEach(input => input.addEventListener('input', () => {
-    input.parentElement.querySelector('strong').textContent = input.value;
-  }));
-}
-
-function saveArchetypeTest() {
-  const answers = {};
-  $('#archetype-quiz').querySelectorAll('select').forEach(sel => answers[sel.dataset.archetypeQ] = sel.value);
-  if (Object.values(answers).some(v => !v)) { showToast('Responde todas las preguntas de Arquetipo'); return; }
-  state.personalMap.archetypeAnswers = answers;
-  const counts = Object.values(answers).reduce((acc, val) => { acc[val] = (acc[val] || 0) + 1; return acc; }, {});
-  let max = 0, winner = '';
-  for (const [k, v] of Object.entries(counts)) { if (v > max) { max = v; winner = k; } }
-  state.personalMap.archetype = winner;
-  saveState();
-  renderDiagnosisResults();
-  updateStatusIndicators();
-  showToast('Test de Arquetipo guardado');
-}
-
-function saveEnneagramTest() {
-  const answers = {};
-  $$('[data-enneagram-q]').forEach(input => answers[input.dataset.enneagramQ] = +input.value);
-  state.personalMap.enneagramAnswers = answers;
-  state.personalMap.enneagram = topKey(answers) || '';
-  if (state.personalMap.enneagram) state.userProfile.enneagram = state.personalMap.enneagram;
-  saveState(); renderDiagnosisResults(); updateStatusIndicators(); showToast('Eneagrama sugerido');
-}
-
-function saveProductivityTest() {
-  const answers = {};
-  $$('[data-productivity-q]').forEach(input => answers[input.dataset.productivityQ] = +input.value);
-  state.personalMap.productivityAnswers = answers;
-  state.personalMap.productivity = topKey(answers) || '';
-  if (state.personalMap.productivity) state.userProfile.learning = state.personalMap.productivity;
-  saveState(); renderDiagnosisResults(); updateStatusIndicators(); showToast('Perfil de productividad calculado');
-}
-
-function topKey(scores) {
-  return Object.entries(scores || {}).sort((a,b) => b[1] - a[1])[0]?.[0] || '';
-}
-
-function renderDiagnosisResults() {
-  if(!state.personalMap) state.personalMap = {};
-  const archetype = state.personalMap.archetype;
-  const enneagram = state.personalMap.enneagram;
-  const productivity = state.personalMap.productivity;
-  
-  if($('#archetype-result')) $('#archetype-result').innerHTML = archetype ? `<strong>${ARCHETYPE_LABELS[archetype]}</strong><span>Resultado sugerido por tus respuestas. Genera un informe IA para matizarlo.</span>` : '<span>Completa el test para ver tu arquetipo base.</span>';
-  if($('#enneagram-result')) $('#enneagram-result').innerHTML = enneagram ? `<strong>Tipo ${enneagram}</strong><span>Eneatipo probable. La IA evaluará tus alas y niveles de integración.</span>` : '<span>Completa el test para ver tu eneatipo probable.</span>';
-  if($('#productivity-result')) $('#productivity-result').innerHTML = productivity ? `<strong>${PRODUCTIVITY_LABELS[productivity]}</strong><span>Tu sistema neuro-cognitivo dominante para la ejecución.</span>` : '<span>Completa el test para detectar tu estilo neuro-productivo.</span>';
-  
-  const summary = $('#diagnosis-summary');
-  if(summary) {
-    summary.innerHTML = `
-      <div class="summary-line"><span>Arquetipo Base</span><strong>${archetype ? ARCHETYPE_LABELS[archetype] : 'Pendiente'}</strong></div>
-      <div class="summary-line"><span>Eneagrama</span><strong>${enneagram ? 'Tipo ' + enneagram : 'Pendiente'}</strong></div>
-      <div class="summary-line"><span>Estilo Ejecutivo</span><strong>${productivity ? PRODUCTIVITY_LABELS[productivity] : 'Pendiente'}</strong></div>
-    `;
-  }
-}
-
-function updateStatusIndicators() {
-  const map = state.personalMap || {};
-  if($('#archetype-status')) {
-    $('#archetype-status').textContent = map.archetype ? 'Completado' : 'Pendiente';
-    $('#archetype-status').style.color = map.archetype ? 'var(--accent-green)' : 'var(--text-muted)';
-  }
-  if($('#enneagram-status')) {
-    $('#enneagram-status').textContent = map.enneagram ? 'Completado' : 'Pendiente';
-    $('#enneagram-status').style.color = map.enneagram ? 'var(--accent-green)' : 'var(--text-muted)';
-  }
-  if($('#productivity-status')) {
-    $('#productivity-status').textContent = map.productivity ? 'Completado' : 'Pendiente';
-    $('#productivity-status').style.color = map.productivity ? 'var(--accent-green)' : 'var(--text-muted)';
-  }
-}
-
 // ─── PRIDE & GRATITUDE ───
 function initPride() { $('#add-pride-btn').addEventListener('click',addPride); }
 function addPride() {
   const t=$('#pride-input').value.trim(); if(!t)return;
   state.prideLogs.push({id:gid(),content:t,date:todayStr()});
   saveState(); $('#pride-input').value='';
-  addXP(20, 'Orgullo registrado 🏆'); renderPride(); calcStreak();
+  renderPride(); calcStreak();
 }
 function renderPride() {
   const c=$('#pride-list'); if(!c)return;
@@ -1288,7 +1063,7 @@ function addGratitude() {
   const t=$('#gratitude-input').value.trim(); if(!t)return;
   state.gratitudeLogs.push({id:gid(),content:t,date:todayStr()});
   saveState(); $('#gratitude-input').value='';
-  addXP(20, 'Gratitud registrada'); renderGratitude(); calcStreak();
+  renderGratitude(); calcStreak();
 }
 function renderGratitude() {
   const c=$('#gratitude-list'); if(!c)return;
@@ -1610,13 +1385,6 @@ function renderWeeklyReviewWizard() {
   }
 }
 
-function renderAdvancedTools() {
-  const slot = $('#mind-advanced-tools');
-  const section = $('.profile-assessments-section');
-  if (slot && section && section.parentElement !== slot) slot.appendChild(section);
-  if (section) section.hidden = state.settings?.advancedTools !== true;
-}
-
 function renderLifeWheel() {
   if (!lifeWheelComponent) lifeWheelComponent = new LifeWheel({ $, getState: () => state, saveState });
   lifeWheelComponent.render();
@@ -1647,7 +1415,8 @@ function openSmartForm(prefill = {}) {
 function renderSmartSelectors() {
   const big5 = $('#smart-big5');
   if (big5) {
-    const options = (state.annualBig5 || []).map((item, index) => ({ item, index })).filter(entry => entry.item);
+    // Solo se ofrecen las 3 metas del año que se muestran en Visión.
+    const options = (state.annualBig5 || []).slice(0, VISION_ITEM_LIMIT).map((item, index) => ({ item, index })).filter(entry => entry.item);
     big5.innerHTML = '<option value="">Sin vínculo</option>' + options.map(entry => `<option value="${entry.index}">${entry.index + 1}. ${esc(entry.item)}</option>`).join('');
   }
   const area = $('#smart-life-area');
@@ -1696,8 +1465,9 @@ function renderSmartGoals(){
   c.innerHTML=state.smartGoals.map(g=>{const st=new Date(g.startDate),now=new Date(),el=Math.floor((now-st)/864e5),pr=Math.min(100,Math.round(el/g.duration*100)),dl=Math.max(0,g.duration-el);
     const real=Math.min(100,Math.max(0,Number(g.progress||0)));
     const focusBadge = focusIds.has(g.id) ? '<span class="focus-badge">En foco</span>' : '';
-    return`<div class="smart-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;"><div><div style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;margin-bottom:8px;">${esc(g.goal)} ${focusBadge}</div><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;"><div class="smart-field"><span class="smart-label">Medible</span><div style="font-size:0.9rem;">${esc(g.measurable||'—')}</div></div><div class="smart-field"><span class="smart-label">Relevancia</span><div style="font-size:0.9rem;">${esc(g.relevance||'—')}</div></div><div class="smart-field"><span class="smart-label">Alcanzable</span><div style="font-size:0.9rem;">${g.achievable?'Si':'No definido'}</div></div><div class="smart-field"><span class="smart-label">Plazo</span><div style="font-size:0.9rem;">${g.duration} dias (quedan ${dl})</div></div></div></div><button class="btn-delete" data-del-sm="${g.id}" style="opacity:0.6;" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div><div class="smart-progress-panel"><div class="smart-progress-row"><span class="smart-label">Avance real</span><strong>${real}%</strong></div><input type="range" class="timeline-slider smart-progress-input" min="0" max="100" value="${real}" data-progress-sm="${g.id}"><div class="smart-progress-track"><div style="width:${real}%"></div></div><label class="smart-label" style="margin-top:12px;">Siguiente avance visible</label><input class="zen-input smart-next-step-input" value="${esc(g.nextStep||'')}" data-next-sm="${g.id}" placeholder="Define el siguiente paso medible..."><div class="smart-time-progress"><span>Progreso temporal</span><span>${pr}%</span></div></div></div>`;}).join('');
+    return`<div class="smart-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;"><div><div style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;margin-bottom:8px;">${esc(g.goal)} ${focusBadge}</div><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;"><div class="smart-field"><span class="smart-label">Medible</span><div style="font-size:0.9rem;">${esc(g.measurable||'—')}</div></div><div class="smart-field"><span class="smart-label">Relevancia</span><div style="font-size:0.9rem;">${esc(g.relevance||'—')}</div></div><div class="smart-field"><span class="smart-label">Alcanzable</span><div style="font-size:0.9rem;">${g.achievable?'Si':'No definido'}</div></div><div class="smart-field"><span class="smart-label">Plazo</span><div style="font-size:0.9rem;">${g.duration} dias (quedan ${dl})</div></div></div></div><button class="btn-delete" data-del-sm="${g.id}" style="opacity:0.6;" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div><div class="smart-progress-panel"><div class="smart-progress-row"><span class="smart-label">Avance real</span><strong>${real}%</strong></div><input type="range" class="timeline-slider smart-progress-input" min="0" max="100" value="${real}" data-progress-sm="${g.id}"><div class="smart-progress-track"><div style="width:${real}%"></div></div><label class="smart-label" style="margin-top:12px;">Siguiente avance visible</label><input class="zen-input smart-next-step-input" value="${esc(g.nextStep||'')}" data-next-sm="${g.id}" placeholder="Define el siguiente paso medible..."><div class="smart-time-progress"><span>Progreso temporal</span><span>${pr}%</span></div><button class="zen-btn zen-btn-ghost goal-help-btn" data-goal-help="${g.id}" style="margin-top:12px;">Ayúdame con esta meta</button></div></div>`;}).join('');
   c.querySelectorAll('[data-del-sm]').forEach(b=>b.addEventListener('click',()=>{state.smartGoals=state.smartGoals.filter(g=>g.id!==b.dataset.delSm);saveState();renderSmartGoals();}));
+  c.querySelectorAll('[data-goal-help]').forEach(b=>b.addEventListener('click',()=>generateGoalHelpReport(b.dataset.goalHelp)));
   c.querySelectorAll('[data-progress-sm]').forEach(inp=>{
     const updateSmartProgressUI = () => {
       const card = inp.closest('.smart-card');
@@ -1733,11 +1503,6 @@ function initGiants(){$('#add-giant-btn').addEventListener('click',()=>{if(state
 function saveGiant(){const n=$('#giant-name').value.trim();if(!n){showToast('Escribe el nombre');return;}state.circleOfGiants.push({id:gid(),name:n,role:$('#giant-role').value.trim(),action:$('#giant-action').value.trim(),status:$('#giant-status').value,lastContact:todayStr()});saveState();$('#giant-name').value='';$('#giant-role').value='';$('#giant-action').value='';$('#giant-form').style.display='none';$('#add-giant-btn').style.display='';renderGiants();showToast('Gigante agregado');}
 function renderGiants(){const c=$('#giants-container');if(!c)return;if(!state.circleOfGiants.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></div><div class="empty-state-text">Agrega a las 5 personas que más impulsan tu crecimiento</div></div>';return;}c.innerHTML=state.circleOfGiants.map(g=>{const i=g.name.charAt(0).toUpperCase(),sc=g.status==='connected'?'connected':'to-reach',st=g.status==='connected'?'Conectado':'Por Contactar';return`<div class="giant-card"><div class="giant-avatar">${i}</div><div class="giant-info"><span class="giant-name">${esc(g.name)}</span><span class="giant-role">${esc(g.role||'Sin rol')}</span>${g.action?`<span style="font-size:0.7rem;color:var(--accent-orange);margin-top:2px;">→ ${esc(g.action)}</span>`:''}</div><div style="display:flex;align-items:center;gap:8px;"><span class="giant-status ${sc}">${st}</span><button class="btn-delete" data-del-gi="${g.id}" style="opacity:0.5;" aria-label="Eliminar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div></div>`;}).join('');c.querySelectorAll('[data-del-gi]').forEach(b=>b.addEventListener('click',()=>{state.circleOfGiants=state.circleOfGiants.filter(g=>g.id!==b.dataset.delGi);saveState();renderGiants();}));}
 
-// ─── QUARTERLY 10 ───
-function initQuarterly(){if($('#save-quarterly-btn'))$('#save-quarterly-btn').addEventListener('click',saveQuarterly);}
-function renderQuarterly10(){const c=$('#quarterly10-container');if(!c)return;c.innerHTML=state.quarterly10.map((item,i)=>`<div class="big5-item quarterly-idea-item"><span class="big5-number" style="color:var(--accent-orange);">${i+1}</span><input class="zen-input" value="${esc(item)}" data-q10="${i}" placeholder="Idea ${i+1}...">${item?`<button class="zen-btn zen-btn-ghost" data-convert-q10="${i}">Convertir en meta</button>`:''}</div>`).join('');c.querySelectorAll('[data-q10]').forEach(inp=>inp.addEventListener('blur',()=>{state.quarterly10[+inp.dataset.q10]=inp.value;saveState();renderQuarterly10();}));c.querySelectorAll('[data-convert-q10]').forEach(btn=>btn.addEventListener('click',()=>{const idea=state.quarterly10[+btn.dataset.convertQ10]||'';if(idea)openSmartForm({goal:idea});}));}
-function saveQuarterly(){ $$('[data-q10]').forEach(inp=>{state.quarterly10[+inp.dataset.q10]=inp.value;}); state.sectionDates.quarterly=todayStr(); saveState(); logActivity(todayStr()); showToast('Prioridades trimestrales guardadas');}
-
 // ─── ANNUAL ───
 function initAnnual() {
   if($('#save-annual-btn'))$('#save-annual-btn').addEventListener('click',saveAnnual);
@@ -1753,10 +1518,14 @@ function initAnnual() {
     });
   }
 }
-function renderAnnual(){renderB5('annual-big5',state.annualBig5,'big5');renderB5('annual-values',state.values5,'values');renderB5('annual-become',state.mustBecome5,'become');const v=$('#vision-text');if(v&&document.activeElement!==v){v.value=state.visionText||'';}}
-function renderB5(cid,data,sk){const c=$(`#${cid}`);if(!c)return;const ph={big5:['Meta anual principal...','Segunda gran meta...','Tercer objetivo...','Cuarta prioridad...','Quinta meta...'],values:['Primer valor...','Segundo valor...','Tercer valor...','Cuarto valor...','Quinto valor...'],become:['¿En quién me convertiré?','Segunda identidad...','Tercer aspecto...','Cuarta cualidad...','Quinta transformación...']};c.innerHTML=data.map((item,i)=>{const activeCount=sk==='big5'?(state.smartGoals||[]).filter(goal=>goal.big5Index===i&&goal.status!=='done'&&goal.status!=='paused'&&!goal.completed).length:0;return`<div class="big5-item"><span class="big5-number">${i+1}</span><input class="zen-input" value="${esc(item)}" data-lk="${sk}" data-li="${i}" placeholder="${esc((ph[sk]&&ph[sk][i])||'')}">${sk==='big5'&&item?`<span class="task-goal-tag">${activeCount} metas activas</span>${activeCount===0?`<button class="zen-btn zen-btn-ghost" data-create-big5="${i}">Crear</button>`:''}`:''}</div>`;}).join('');c.querySelectorAll(`[data-lk="${sk}"]`).forEach(inp=>inp.addEventListener('blur',()=>{const idx=+inp.dataset.li;if(sk==='big5')state.annualBig5[idx]=inp.value;else if(sk==='values')state.values5[idx]=inp.value;else state.mustBecome5[idx]=inp.value;saveState();renderSmartSelectors();}));c.querySelectorAll('[data-create-big5]').forEach(btn=>btn.addEventListener('click',()=>openSmartForm({big5Index:+btn.dataset.createBig5})));}
+// La Visión fusiona: mi visión, 3 valores y las 3 metas del año (con su conteo de metas
+// trimestrales activas); solo se muestran los primeros 3 elementos de cada arreglo de 5,
+// los dos últimos quedan sin usar en el estado pero no se borran (ver plan §B.6).
+const VISION_ITEM_LIMIT = 3;
+function renderAnnual(){renderB5('annual-big5',state.annualBig5.slice(0,VISION_ITEM_LIMIT),'big5');renderB5('annual-values',state.values5.slice(0,VISION_ITEM_LIMIT),'values');const v=$('#vision-text');if(v&&document.activeElement!==v){v.value=state.visionText||'';}}
+function renderB5(cid,data,sk){const c=$(`#${cid}`);if(!c)return;const ph={big5:['Meta anual principal...','Segunda gran meta...','Tercer objetivo...'],values:['Primer valor...','Segundo valor...','Tercer valor...']};c.innerHTML=data.map((item,i)=>{const activeCount=sk==='big5'?(state.smartGoals||[]).filter(goal=>goal.big5Index===i&&goal.status!=='done'&&goal.status!=='paused'&&!goal.completed).length:0;return`<div class="big5-item"><span class="big5-number">${i+1}</span><input class="zen-input" value="${esc(item)}" data-lk="${sk}" data-li="${i}" placeholder="${esc((ph[sk]&&ph[sk][i])||'')}">${sk==='big5'&&item?`<span class="task-goal-tag">${activeCount} metas activas</span>${activeCount===0?`<button class="zen-btn zen-btn-ghost" data-create-big5="${i}">Crear</button>`:''}`:''}</div>`;}).join('');c.querySelectorAll(`[data-lk="${sk}"]`).forEach(inp=>inp.addEventListener('blur',()=>{const idx=+inp.dataset.li;if(sk==='big5')state.annualBig5[idx]=inp.value;else state.values5[idx]=inp.value;saveState();renderSmartSelectors();}));c.querySelectorAll('[data-create-big5]').forEach(btn=>btn.addEventListener('click',()=>openSmartForm({big5Index:+btn.dataset.createBig5})));}
 function saveAnnual(){
-  const v=$('#vision-text');if(v)state.visionText=v.value;$$('[data-lk]').forEach(inp=>{const idx=+inp.dataset.li;if(inp.dataset.lk==='big5')state.annualBig5[idx]=inp.value;else if(inp.dataset.lk==='values')state.values5[idx]=inp.value;else if(inp.dataset.lk==='become')state.mustBecome5[idx]=inp.value;});state.sectionDates.annual=todayStr();saveState();logActivity(todayStr());showToast('Visión anual guardada');
+  const v=$('#vision-text');if(v)state.visionText=v.value;$$('[data-lk]').forEach(inp=>{const idx=+inp.dataset.li;if(inp.dataset.lk==='big5')state.annualBig5[idx]=inp.value;else if(inp.dataset.lk==='values')state.values5[idx]=inp.value;});state.sectionDates.annual=todayStr();saveState();logActivity(todayStr());showToast('Visión guardada');renderAnnual();
   const editVisionBtn = $('#edit-vision-btn');
   const visionCard = $('#vision-card');
   const saveVisionBtn = $('#save-annual-btn');
@@ -1804,7 +1573,6 @@ function renderCalendar() {
     const dStr = `${y}-${String(m+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
     const activity = getDayActivity(dStr);
     const dots = [
-      activity.victories.length ? '<span class="cal-dot victory"></span>' : '',
       activity.prides.length ? '<span class="cal-dot pride"></span>' : '',
       activity.gratitude.length ? '<span class="cal-dot gratitude"></span>' : '',
       activity.beliefs.length ? '<span class="cal-dot belief"></span>' : '',
@@ -1869,14 +1637,10 @@ function getSectionItemsForDate(dateStr) {
   if (dates.stopDoing === dateStr && state.stopDoingList) {
     state.stopDoingList.filter(Boolean).forEach(value => items.push({ section:'Dejar de hacer', text:value }));
   }
-  if (dates.quarterly === dateStr && state.quarterly10) {
-    state.quarterly10.filter(Boolean).forEach((value, i) => items.push({ section:'Trimestral', text:`${i + 1}. ${value}` }));
-  }
   if (dates.annual === dateStr) {
-    if (state.visionText) items.push({ section:'Anual', text:`Visión: ${state.visionText}` });
-    (state.annualBig5 || []).filter(Boolean).forEach((value, i) => items.push({ section:'Big 5', text:`${i + 1}. ${value}` }));
-    (state.values5 || []).filter(Boolean).forEach((value, i) => items.push({ section:'Valores', text:`${i + 1}. ${value}` }));
-    (state.mustBecome5 || []).filter(Boolean).forEach((value, i) => items.push({ section:'Identidad', text:`${i + 1}. ${value}` }));
+    if (state.visionText) items.push({ section:'Visión', text:`Visión: ${state.visionText}` });
+    (state.annualBig5 || []).slice(0, VISION_ITEM_LIMIT).filter(Boolean).forEach((value, i) => items.push({ section:'Metas del año', text:`${i + 1}. ${value}` }));
+    (state.values5 || []).slice(0, VISION_ITEM_LIMIT).filter(Boolean).forEach((value, i) => items.push({ section:'Valores', text:`${i + 1}. ${value}` }));
   }
   return items;
 }
@@ -1902,7 +1666,6 @@ function renderDayDetail(dateStr) {
     ['Secciones guardadas', sectionHtml],
     ['Gratitud', activity.gratitude.map(x => x.content)],
     ['Orgullos', activity.prides.map(x => x.content)],
-    ['Victorias', activity.victories.map(x => x.content || x.text || x.title || 'Victoria registrada')],
     ['Creencias reconfiguradas', activity.beliefs.map(x => `${x.belief} -> ${x.reframe}`)],
     ['Sesiones de enfoque', activity.focusCount ? [`${activity.focusCount} acción(es) registradas`] : []]
   ];
@@ -1945,8 +1708,6 @@ function initProfile() {
   $('#profile-clear-ai-key-btn')?.addEventListener('click', clearAIKeyForSession);
   $('#profile-ai-provider')?.addEventListener('change', syncAIModelDefault);
   
-  $$('.ai-report-btn').forEach(b => b.addEventListener('click', () => generateAIReport(b.dataset.type)));
-
   const closeAiBtn = $('#close-ai-settings-btn');
   if (closeAiBtn) {
     closeAiBtn.addEventListener('click', () => closeAiSettingsModal());
@@ -1955,13 +1716,7 @@ function initProfile() {
   $('#restart-onboarding-btn')?.addEventListener('click', () => startOnboardingTour(true));
   $('#open-advanced-settings-btn')?.addEventListener('click', () => openAiSettingsModal());
   $('#export-data-btn')?.addEventListener('click', () => {
-    const payload = JSON.stringify(getExportState(), null, 2);
-    const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `roka-datos-${todayStr()}.json`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadExportData();
     showToast('Copia de datos preparada');
   });
   $('#profile-context-core')?.addEventListener('change', event => {
@@ -1972,11 +1727,7 @@ function initProfile() {
     state.coachPreferences.useSensitiveContext = event.target.checked;
     saveState();
   });
-  $('#profile-advanced-tools')?.addEventListener('change', event => {
-    state.settings.advancedTools = event.target.checked;
-    saveState();
-    renderAdvancedTools();
-  });
+  $('#start-from-zero-btn')?.addEventListener('click', openResetModal);
   $('#profile-coach-style')?.addEventListener('change', event => {
     state.coachPreferences.style = event.target.value;
     saveState();
@@ -1995,20 +1746,14 @@ function initProfile() {
 }
 
 function saveProfile() {
-  if (!state.userProfile) state.userProfile = { name: '', archetype: '', fears: '', values: '', learning: '', lifeHistory: '', enneagram: '', birthDate: '', birthTime: '', birthPlace: '' };
+  if (!state.userProfile) state.userProfile = { name: '', fears: '', values: '', lifeHistory: '' };
   state.userProfile.name = $('#profile-name').value;
-  if (document.querySelector('#profile-archetype')) state.userProfile.archetype = document.querySelector('#profile-archetype').value;
   state.userProfile.fears = $('#profile-fears').value;
   state.userProfile.values = $('#profile-values').value;
-  if (document.querySelector('#profile-learning')) state.userProfile.learning = document.querySelector('#profile-learning').value;
   state.userProfile.lifeHistory = $('#profile-life-history').value;
-  if (document.querySelector('#profile-enneagram')) state.userProfile.enneagram = document.querySelector('#profile-enneagram').value;
-  state.userProfile.birthDate = $('#profile-birth-date').value;
-  state.userProfile.birthTime = $('#profile-birth-time').value;
-  state.userProfile.birthPlace = $('#profile-birth-place').value;
   saveState();
-  addXP(20, 'Configuración actualizada');
-  
+  showToast('Configuración actualizada');
+
   const profileCard = $('#profile-card');
   const editProfileBtn = $('#edit-profile-btn');
   const btn = $('#save-profile-btn');
@@ -2039,18 +1784,12 @@ function saveAIConfig(source = 'modal') {
 }
 
 function renderProfile() {
-  if (!state.userProfile) state.userProfile = { name: '', archetype: '', fears: '', values: '', learning: '', lifeHistory: '', enneagram: '', birthDate: '', birthTime: '', birthPlace: '' };
+  if (!state.userProfile) state.userProfile = { name: '', fears: '', values: '', lifeHistory: '' };
   const p = state.userProfile;
   if($('#profile-name')) $('#profile-name').value = p.name || '';
-  if(document.querySelector('#profile-archetype')) document.querySelector('#profile-archetype').value = p.archetype || '';
   if($('#profile-fears')) $('#profile-fears').value = p.fears || '';
   if($('#profile-values')) $('#profile-values').value = p.values || '';
-  if(document.querySelector('#profile-learning')) document.querySelector('#profile-learning').value = p.learning || '';
   if($('#profile-life-history')) $('#profile-life-history').value = p.lifeHistory || '';
-  if(document.querySelector('#profile-enneagram')) document.querySelector('#profile-enneagram').value = p.enneagram || '';
-  if($('#profile-birth-date')) $('#profile-birth-date').value = p.birthDate || '';
-  if($('#profile-birth-time')) $('#profile-birth-time').value = p.birthTime || '';
-  if($('#profile-birth-place')) $('#profile-birth-place').value = p.birthPlace || '';
   requestAnimationFrame(() => {
     $$('#profile-card textarea').forEach(area => {
       area.style.height = 'auto';
@@ -2071,29 +1810,13 @@ function renderProfile() {
   if($('#ai-context-sensitive')) $('#ai-context-sensitive').checked = state.coachPreferences.useSensitiveContext === true;
   if($('#profile-context-core')) $('#profile-context-core').checked = state.coachPreferences.useCoreContext !== false;
   if($('#profile-context-sensitive')) $('#profile-context-sensitive').checked = state.coachPreferences.useSensitiveContext === true;
-  if($('#profile-advanced-tools')) $('#profile-advanced-tools').checked = state.settings?.advancedTools === true;
   if($('#profile-coach-style')) $('#profile-coach-style').value = state.coachPreferences.style || 'direct';
   renderThemePresets();
-  
-  if ($('#profile-xp-total')) $('#profile-xp-total').textContent = `${state.gamification ? state.gamification.xp : 0} XP Total`;
-  
-  const container = $('#badges-container');
-  if (container) {
-    if (!state.gamification) state.gamification = { xp: 0, level: 1, badges: [] };
-    const unlocked = state.gamification.badges || [];
-    container.innerHTML = BADGES.map(b => {
-      const isUnlocked = unlocked.includes(b.id);
-      return `<div class="badge-item ${isUnlocked ? 'unlocked' : ''}" title="${b.desc}">
-        <div class="badge-icon">${b.icon}</div>
-        <div class="badge-name">${b.name}</div>
-      </div>`;
-    }).join('');
-  }
 }
 
 // ─── PROGRESS DASHBOARD ───
 function renderProgress() {
-  const totalV=state.victories.length, totalB=state.beliefs.length, totalM=state.mantras.length;
+  const totalB=state.beliefs.length, totalM=state.mantras.length;
   const totalP=state.prideLogs.length, totalG=state.smartGoals.length;
   renderLifeAssessment();
   let streak=0; { let d=new Date(); for(let i=0;i<365;i++){const k=localDateKey(d);const has=getDayActivity(k).total;if(has){streak++;d.setDate(d.getDate()-1);}else{if(i===0){d.setDate(d.getDate()-1);continue;}break;}} }
@@ -2101,7 +1824,6 @@ function renderProgress() {
 
   const stats=[
     {icon:'i-flame',value:streak,label:'Racha de dias',color:'var(--accent-orange)'},
-    {icon:'i-check',value:totalV,label:'Victorias',color:'var(--accent-green)'},
     {icon:'i-refresh-cw',value:totalB,label:'Creencias rotas',color:'var(--accent-orange)'},
     {icon:'i-target',value:totalM,label:'Mantras activos',color:'var(--accent-green)'},
     {icon:'i-star',value:totalP,label:'Orgullos',color:'var(--accent-gold)'},
@@ -2178,9 +1900,6 @@ function getCompletionScore() {
     !!(state.userProfile && state.userProfile.name),
     !!(state.userProfile && state.userProfile.values),
     !!(state.userProfile && state.userProfile.fears),
-    !!(state.personalMap && state.personalMap.archetype),
-    !!(state.personalMap && state.personalMap.enneagram),
-    !!(state.personalMap && state.personalMap.productivity),
     tasks.length > 0,
     tasks.some(t => t.completed),
     (state.gratitudeLogs || []).some(g => g.date === today),
@@ -2199,7 +1918,6 @@ function getUserJourneyStatus() {
   const completedTasks = tasks.filter(t => t.completed).length;
   const missing = [];
   if (!state.userProfile?.name) missing.push('completa tu perfil base');
-  if (!state.personalMap?.archetype || !state.personalMap?.enneagram || !state.personalMap?.productivity) missing.push('calcula tu mapa personal');
   if (!tasks.length) missing.push('define el plan del día');
   if (!(state.gratitudeLogs || []).some(g => g.date === today)) missing.push('registra gratitud');
   if (!(state.prideLogs || []).some(p => p.date === today)) missing.push('registra un orgullo');
@@ -2216,7 +1934,6 @@ function getUserJourneyStatus() {
     missing,
     steps: [
       { key: 'llenar', label: 'Llenar', done: tasks.length > 0 || !!state.userProfile?.name },
-      { key: 'entender', label: 'Entender', done: !!state.personalMap?.archetype && !!state.personalMap?.enneagram },
       { key: 'planear', label: 'Planear', done: (state.smartGoals || []).length > 0 },
       { key: 'ejecutar', label: 'Ejecutar', done: completedTasks > 0 || hasCompletedRitual(today) },
       { key: 'revisar', label: 'Revisar', done: (state.prideLogs || []).some(p => p.date === today) }
@@ -2257,57 +1974,6 @@ Tareas de hoy: ${tasks.map(t => `${t.completed ? '[x]' : '[ ]'} ${t.text} (${t.p
 Gratitud: ${gratitude}
 Orgullos: ${prides}
 ${buildWholeAppContext()}`;
-}
-
-async function generateDailyAIRoute() {
-  const status = getUserJourneyStatus();
-  if (status.score < 20) showSaveStatus('empty');
-  const prompt = `Con este contexto de la app, crea una Ruta Zen para hoy. Debe ser breve, accionable y priorizada.
-
-${getTodayRecommendationContext()}
-
-Formato obligatorio:
-1. Lectura del día en 2 líneas.
-2. Tareas sugeridas desde los siguientes pasos de metas activas.
-3. Tres pasos de ejecución para la primera tarea.
-4. Un riesgo a evitar.
-5. Frase de cierre tipo mantra, sobria.`;
-  try {
-    showSaveStatus('ai');
-    const response = await callAI(prompt, 'Eres un coach central de vida, productividad y enfoque. Tono ryokan: sobrio, claro, directo, sin motivación genérica.');
-    const report = { id: gid(), type: 'daily-route', title: 'Ruta Zen de Hoy', content: response, date: todayStr() };
-    await saveAIReport(report);
-    renderJourneyStatus();
-    switchTab('coach');
-    showCoachView('reports');
-    showToast('Ruta de hoy generada');
-  } catch(e) {
-    showSaveStatus('error', e.message);
-  }
-}
-
-async function generateWeeklyReview() {
-  const prompt = `Genera una revisión semanal accionable a partir del sistema ROKA.
-
-${getTodayRecommendationContext()}
-
-Formato obligatorio:
-1. Patron principal observado.
-2. Lo que debe continuar.
-3. Lo que debe detenerse.
-4. Tres prioridades para la semana.
-5. Siguiente paso SMART.`;
-  try {
-    showSaveStatus('ai');
-    const response = await callAI(prompt, 'Eres un estratega semanal. Lee patrones, contradicciones y siguiente acción. Nada de relleno.');
-    const report = { id: gid(), type: 'weekly-review', title: 'Revisión Semanal IA', content: response, date: todayStr() };
-    await saveAIReport(report);
-    switchTab('coach');
-    showCoachView('reports');
-    showToast('Revisión semanal generada');
-  } catch(e) {
-    showSaveStatus('error', e.message);
-  }
 }
 
 // ─── AI INTEGRATION ───
@@ -2510,96 +2176,73 @@ function renderThemePresets() {
   });
 }
 
-async function generateAIReport(type) {
-  if (!state.userProfile) { showToast('Guarda tu perfil primero.'); return; }
-  const p = state.userProfile;
-  let prompt = `Perfil del usuario:\nNombre: ${p.name||'Usuario'}\nEneagrama: ${p.enneagram||'No especificado'}\nValores: ${p.values||'No especificados'}\nMiedos: ${p.fears||'No especificados'}\nHistorial de vida: ${p.lifeHistory||'No provisto'}\nNacimiento: ${p.birthDate||'No provisto'} ${p.birthTime||''} en ${p.birthPlace||'No provisto'}\n\n`;
-  let title = '';
-  
-  if (type === 'astral') {
-    prompt += `Genera una Carta Astral completa y Misión de Vida basándote en su fecha, hora y lugar de nacimiento, combinándolo con sus miedos y valores.`;
-    title = 'Carta Astral & Misión de Vida';
-  } else if (type === 'psych') {
-    prompt += `Genera un Perfil Psicológico Profundo basándote en su eneagrama, historial de vida y miedos. Usa psicología profunda para darle feedback transformacional.`;
-    title = 'Perfil Psicológico & Eneagrama';
-  } else if (type === 'strategy') {
-    prompt += `Genera una Estrategia Zen a 5 Años. Desglosa los próximos pasos según sus valores, historial de vida, estilo de aprendizaje (${p.learning}) y arquetipo (${p.archetype}).`;
-    title = 'Estrategia Zen a 5 Años';
+// "Ayúdame con esta meta": único informe nuevo (además del feedback de la revisión semanal que
+// ya existe en el asistente). Usa la meta, su SMART, el avance, el siguiente paso, los rituales
+// vinculados, las tareas relacionadas de los últimos 14 días y la última revisión semanal.
+async function generateGoalHelpReport(goalId) {
+  const goal = (state.smartGoals || []).find(item => item.id === goalId);
+  if (!goal) { showToast('No se encontró la meta.'); return; }
+  const linkedRituals = (state.rituals || []).filter(r => r.goalId === goalId);
+  const ritualsText = linkedRituals.length
+    ? linkedRituals.map(r => { const ad = ritualAdherence(state, r.id, todayStr(), 14); return `- ${r.name}: ${ad.completed}/${ad.scheduled} en 14 días`; }).join('\n')
+    : 'Sin rituales vinculados';
+  const relatedTasks = [];
+  for (let i = 0; i < 14; i++) {
+    const date = localDateKey(new Date(Date.now() - i * 86400000));
+    (state.dailyTasks?.[date] || []).filter(task => task.goalId === goalId).forEach(task => {
+      relatedTasks.push(`${date}: ${task.completed ? '[x]' : '[ ]'} ${task.text}`);
+    });
   }
+  const lastReview = [...(state.weeklyReviews || [])].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0];
 
-  try {
-    const response = await callAI(prompt, 'Eres un maestro Zen, astrólogo experto y psicólogo profundo. Responde siempre en formato Markdown, con un tono sabio, claro y revelador. Mantén el formato ordenado y profundo.');
-    const report = { id: gid(), type, title, content: response, date: todayStr() };
-    if(!state.aiReports) state.aiReports = [];
-    await saveAIReport(report);
-    showToast('Reporte generado con éxito');
-  } catch(e) { showToast(e.message); }
-}
+  const prompt = `Meta SMART del usuario:
+Meta: ${goal.goal}
+Medible: ${goal.measurable || 'No especificado'}
+Relevancia: ${goal.relevance || 'No especificada'}
+Plazo: ${goal.duration || 0} días desde ${goal.startDate || 'sin fecha'}
+Avance actual: ${Number(goal.progress || 0)}%
+Siguiente paso definido: ${goal.nextStep || 'Sin siguiente paso'}
 
-async function generateMapReport(type) {
-  const p = state.userProfile || {};
-  const map = state.personalMap || {};
-  const context = buildWholeAppContext();
-  const archetype = map.archetype ? ARCHETYPE_LABELS[map.archetype] : 'No calculado';
-  const enneagram = map.enneagram ? `Tipo ${map.enneagram}` : 'No calculado';
-  const productivity = map.productivity ? PRODUCTIVITY_LABELS[map.productivity] : 'No calculado';
-  let title = 'Mapa Personal IA';
-  let ask = 'Genera un mapa personal claro: fortalezas, bloqueos, estilo de acción, riesgos y recomendaciones.';
-  if(type === 'steps') {
-    title = 'Siguientes Pasos';
-    ask = 'Genera un plan de pasos accionables: hoy, esta semana, este mes y próximos 90 días. Prioriza con claridad y evita frases genéricas.';
-  } else if(type === 'deep') {
-    title = 'Diagnóstico Profundo';
-    ask = 'Genera un diagnóstico profundo integrando arquetipo, eneagrama, productividad, miedos, metas, hábitos y visión. Incluye contradicciones, patrones y palancas de cambio.';
-  }
-  const prompt = `
-Nombre: ${p.name || 'Usuario'}
-Arquetipo sugerido: ${archetype}
-Eneagrama sugerido: ${enneagram}
-Perfil de productividad: ${productivity}
-Valores: ${p.values || 'No especificados'}
-Miedos/bloqueos: ${p.fears || 'No especificados'}
-Historia de vida: ${p.lifeHistory || 'No provista'}
+Rituales vinculados (últimos 14 días):
+${ritualsText}
 
-Datos actuales de la app:
-${context}
+Tareas relacionadas (últimos 14 días):
+${relatedTasks.join('\n') || 'Sin tareas relacionadas'}
 
-Solicitud:
-${ask}
+Última revisión semanal:
+Salió bien: ${lastReview?.well || 'Sin revisión'}
+Ajuste: ${lastReview?.adjust || 'Sin revisión'}
 
 Formato obligatorio en Markdown:
-## Resumen ejecutivo
-Tres frases claras y específicas.
-## Hallazgos
-De tres a cinco hallazgos vinculados con los datos disponibles.
-## Evidencia utilizada
-Indica qué datos de ROKA sustentan la lectura y qué información falta.
-## Plan de acción
-Tres acciones concretas, priorizadas y medibles.
-## Siguiente paso
-Una sola acción que pueda comenzar hoy en menos de 25 minutos.
+## Diagnóstico
+## Obstáculos probables
+## Plan de 2 semanas
+## Siguiente paso de hoy (menos de 25 minutos)`;
 
-No presentes inferencias psicológicas, de personalidad o astrológicas como diagnóstico clínico o hecho comprobado.
-`;
   try {
-    const response = await callAI(prompt, 'Eres un estratega de vida y productividad con tono sobrio, preciso y práctico. Responde en español, con secciones claras y pasos concretos.');
-    const report = { id: gid(), type: 'map-' + type, title, content: response, date: todayStr() };
-    if(!state.aiReports) state.aiReports = [];
+    showSaveStatus('ai');
+    const response = await callAI(prompt, 'Eres un estratega de ejecución sobrio y directo. Responde en español, sin relleno, con pasos concretos y medibles.');
+    const report = { id: gid(), type: 'goal-help', goalId, title: `Plan: ${goal.goal}`.slice(0, 120), content: response, date: todayStr() };
     await saveAIReport(report);
-    showToast('Informe generado');
-  } catch(e) { showToast('Error IA: ' + e.message); }
+    switchTab('coach');
+    showCoachView('reports');
+    showToast('Plan generado');
+  } catch (e) {
+    showSaveStatus('error', e.message);
+  }
 }
 
 function buildWholeAppContext() {
   const avgLife = Math.round(LIFE_WHEEL_AXES.reduce((sum, axis) => sum + (Number(state.lifeWheel[axis.key]) || 0), 0) / LIFE_WHEEL_AXES.length * 10) / 10;
-  const smart = activeGoals().map(g => `- ${g.goal} (${g.progress || 0}%): ${g.nextStep || 'sin siguiente paso'} | Big 5: ${g.big5Index !== null && g.big5Index !== undefined ? (state.annualBig5[g.big5Index] || 'sin texto') : 'sin vínculo'} | Área: ${getLifeAreaLabel(g.lifeArea) || 'sin área'}`).join('\n') || 'Sin metas SMART activas';
+  // Una meta con big5Index fuera de las 3 metas del año visibles se trata como sin vínculo al
+  // mostrarla (sin modificar el dato guardado).
+  const smart = activeGoals().map(g => { const visibleBig5 = Number.isInteger(g.big5Index) && g.big5Index < VISION_ITEM_LIMIT ? g.big5Index : null; return `- ${g.goal} (${g.progress || 0}%): ${g.nextStep || 'sin siguiente paso'} | Big 5: ${visibleBig5 !== null ? (state.annualBig5[visibleBig5] || 'sin texto') : 'sin vínculo'} | Área: ${getLifeAreaLabel(g.lifeArea) || 'sin área'}`; }).join('\n') || 'Sin metas SMART activas';
   const rituals = (state.rituals || []).map(r => { const ad = ritualAdherence(state, r.id, todayStr(), 7); return `- ${r.name}: ${ad.completed}/${ad.scheduled} últimos 7 días${r.goalId ? ` (meta: ${getGoalTitle(r.goalId)})` : ''}`; }).join('\n') || 'Sin rituales';
   const today = todayStr();
   const todayTasks = (state.dailyTasks[today] || []).map(t => `${t.completed?'[x]':'[ ]'} ${t.text}${t.goalId?` (meta: ${getGoalTitle(t.goalId)})`:''}`).join('; ') || 'Sin tareas hoy';
   const latestReview = [...(state.weeklyReviews || [])].sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
   const lowAreas = lowLifeAreas(state, 4).map(area => `${getLifeAreaLabel(area.key)} ${area.value}/10`).join(', ') || 'Sin áreas bajo 4';
-  const quarterly = (state.quarterly10 || []).filter(Boolean).map((x,i)=>`${i+1}. ${x}`).join('\n') || 'Sin prioridades trimestrales';
-  const annual = (state.annualBig5 || []).filter(Boolean).map((x,i)=>`${i+1}. ${x}`).join('\n') || 'Sin Big 5 anual';
+  const annual = (state.annualBig5 || []).slice(0, VISION_ITEM_LIMIT).filter(Boolean).map((x,i)=>`${i+1}. ${x}`).join('\n') || 'Sin metas del año';
   const stop = (state.stopDoingList || []).filter(Boolean).map(x=>`- ${x}`).join('\n') || 'Sin lista de dejar de hacer';
   return `Promedio rueda de vida: ${avgLife}/10
 Áreas bajas: ${lowAreas}
@@ -2615,10 +2258,8 @@ Ajuste: ${latestReview?.adjust || 'Sin revisión'}
 Aprendizaje: libro=${state.learning.book || '-'}, curso=${state.learning.course || '-'}, conferencia=${state.learning.conference || '-'}, mastermind=${state.learning.mastermind || '-'}
 Stop doing:
 ${stop}
-Prioridades trimestrales:
-${quarterly}
-Visión anual: ${state.visionText || 'Sin visión'}
-Big 5 anual:
+Visión: ${state.visionText || 'Sin visión'}
+Metas del año:
 ${annual}
 Mantras: ${(state.mantras || []).map(m=>m.text).join(' | ') || 'Sin mantras'}
 Creencias reconfiguradas: ${(state.beliefs || []).map(b=>`${b.belief} -> ${b.reframe}`).join(' | ') || 'Sin creencias'}`;
@@ -2716,7 +2357,7 @@ function buildCoachContext() {
   if (state.coachPreferences.useCoreContext === false || $('#coach-use-context')?.checked === false) return 'El usuario decidió no compartir contexto de la app en esta conversación.';
   let context = `Pantalla de origen: ${ROUTES[coachOriginRoute]?.label || 'Hoy'}\n${getTodayRecommendationContext()}`;
   if (state.coachPreferences.useSensitiveContext) {
-    context += `\nContexto sensible autorizado:\nMiedos o bloqueos: ${state.userProfile?.fears || 'Sin datos'}\nHistoria personal: ${state.userProfile?.lifeHistory || 'Sin datos'}\nNacimiento: ${state.userProfile?.birthDate || 'Sin datos'} ${state.userProfile?.birthPlace || ''}`;
+    context += `\nContexto sensible autorizado:\nMiedos o bloqueos: ${state.userProfile?.fears || 'Sin datos'}\nHistoria personal: ${state.userProfile?.lifeHistory || 'Sin datos'}`;
   }
   return context;
 }
@@ -2874,7 +2515,7 @@ function renderAIReportsList() {
   if (!container) return;
   const reports = getVisibleReports();
   if (!reports.length) {
-    container.innerHTML = '<div class="empty-reports"><h3>Todavía no hay informes</h3><p>Genera un mapa personal o un diagnóstico para convertir tus datos en decisiones.</p><button class="zen-btn zen-btn-primary" id="empty-reports-btn">Generar mi primer informe</button></div>';container.querySelector('#empty-reports-btn')?.addEventListener('click',()=>$('.map-report-btn[data-report="personal"]')?.click());
+    container.innerHTML = '<div class="empty-reports"><h3>Todavía no hay informes</h3><p>Pide feedback en tu revisión semanal o usa "Ayúdame con esta meta" en una meta SMART.</p><button class="zen-btn zen-btn-primary" id="empty-reports-btn">Ir a mis metas</button></div>';container.querySelector('#empty-reports-btn')?.addEventListener('click',()=>{switchTab('metas',{focus:true});activateSubtab('metas','strat-quarterly',true);});
     return;
   }
   container.innerHTML = reports.map(report => `
@@ -2887,6 +2528,7 @@ function renderAIReportsList() {
           <button data-report-action="ask">Preguntar al Coach</button>
           <button data-report-action="copy">Copiar</button>
           <button data-report-action="print">Imprimir</button>
+          ${report.type === 'goal-help' && report.goalId ? '<button data-report-action="goal-task">Convertir el siguiente paso en tarea de hoy</button>' : ''}
           <button data-report-action="delete">Eliminar</button>
         </div>
       </div>
@@ -2914,6 +2556,8 @@ function renderAIReportsList() {
     } else if (action === 'print') {
       article.querySelector('.report-body').hidden = false;
       window.print();
+    } else if (action === 'goal-task') {
+      addGoalStepTask(report.goalId);
     } else if (action === 'delete' && confirm(`¿Eliminar “${report.title}”? Esta acción no se puede deshacer.`)) {
       reportCache = reportCache.filter(item => item.id !== report.id);
       state.aiReports = (state.aiReports || []).filter(item => item.id !== report.id);
@@ -3043,14 +2687,13 @@ function initReminders() {
   renderReminders();
 }
 
-function renderAll() { 
-  renderQuote(); renderPride(); renderGratitude(); 
-  renderPlanner(); renderRituals(); renderDailyRitualsQuick(); renderWeeklyReflection(); 
-  renderSmartGoals(); renderLearning(); renderStopDoing(); renderGiants(); renderQuarterly10(); renderAnnual(); renderPersonalMap(); renderProfile(); renderProgress(); renderBeliefsLibrary(); renderMantras(); updateXPDisplay(); checkBadges();
+function renderAll() {
+  renderPride(); renderGratitude();
+  renderPlanner(); renderRituals(); renderDailyRitualsQuick(); renderWeeklyReflection();
+  renderSmartGoals(); renderLearning(); renderStopDoing(); renderGiants(); renderAnnual(); renderProfile(); renderProgress(); renderBeliefsLibrary(); renderMantras();
   safeInit(renderReminders, 'renderReminders');
   renderTodaySystem();
   renderWeeklyReviewWizard();
-  renderAdvancedTools();
   renderJourneyStatus();
   updateClarityPanel();
   renderCalendar();
@@ -3239,13 +2882,12 @@ function initApp() {
   safeInit(initSmartGoals, 'initSmartGoals');
   safeInit(initLearning, 'initLearning');
   safeInit(initStopDoing, 'initStopDoing');
-  safeInit(initQuarterly, 'initQuarterly');
   safeInit(initAnnual, 'initAnnual');
   safeInit(initGiants, 'initGiants');
   safeInit(initMantraSlide, 'initMantraSlide');
   safeInit(initCalendar, 'initCalendar');
-  safeInit(initPersonalMap, 'initPersonalMap');
   safeInit(initProfile, 'initProfile');
+  safeInit(initResetModal, 'initResetModal');
   safeInit(initCoach, 'initCoach');
   safeInit(renderAll, 'renderAll');
   safeInit(() => switchTab(routeFromHash(), { replace: !location.hash, updateHash: !location.hash }), 'switchTab');
@@ -3278,7 +2920,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v45-reminders'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v47-simplify-reset'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }
