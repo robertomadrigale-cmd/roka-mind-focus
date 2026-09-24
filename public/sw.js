@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v48-hoy-order';
+const CACHE_NAME = 'roka-mind-v49-weekly-prompt';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;
