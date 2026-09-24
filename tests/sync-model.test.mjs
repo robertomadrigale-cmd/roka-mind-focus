@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   diffModels,
+  isRemoteResetNewer,
   legacyToModel,
   mergeModels,
   modelToState,
@@ -224,4 +225,24 @@ test('re-migration after a stale legacy overwrite never beats newer v5 edits or 
   const merged = modelToState(mergeModels(legacyToModel(legacy, Date.now()), v5), {});
   assert.equal(merged.smartGoals.length, 1);
   assert.equal(merged.smartGoals[0].goal, 'Meta nueva');
+});
+
+// ─── "Empezar de cero" — lógica de decisión de resetAt ───
+test('isRemoteResetNewer ignores a missing or identical remote resetAt', () => {
+  assert.equal(isRemoteResetNewer('', ''), false);
+  assert.equal(isRemoteResetNewer('2026-09-23T10:00:00.000Z', ''), false);
+  assert.equal(isRemoteResetNewer('2026-09-23T10:00:00.000Z', '2026-09-23T10:00:00.000Z'), false);
+});
+
+test('isRemoteResetNewer is true the first time a device learns of any reset', () => {
+  assert.equal(isRemoteResetNewer('', '2026-09-23T10:00:00.000Z'), true);
+});
+
+test('isRemoteResetNewer compares timestamps when both are known', () => {
+  assert.equal(isRemoteResetNewer('2026-09-23T10:00:00.000Z', '2026-09-23T11:00:00.000Z'), true);
+  assert.equal(isRemoteResetNewer('2026-09-23T11:00:00.000Z', '2026-09-23T10:00:00.000Z'), false);
+});
+
+test('isRemoteResetNewer treats an unparsable known value as older', () => {
+  assert.equal(isRemoteResetNewer('no-es-una-fecha', '2026-09-23T10:00:00.000Z'), true);
 });

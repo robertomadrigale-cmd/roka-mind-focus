@@ -204,16 +204,6 @@ export function migrateState(input = {}) {
   }));
   next.weeklyReviews = (next.weeklyReviews || []).slice(-104);
   next.weekFocus = next.weekFocus || { weekKey: weekKey(), goalIds: [] };
-  const hasAdvancedData = Boolean(
-    next.personalMap?.archetype ||
-    next.personalMap?.enneagram ||
-    next.personalMap?.productivity ||
-    (next.aiReports || []).some(report => report.type === 'astral' || report.type === 'psych')
-  );
-  next.settings = {
-    ...(next.settings || {}),
-    advancedTools: typeof next.settings?.advancedTools === 'boolean' ? next.settings.advancedTools : hasAdvancedData
-  };
   return next;
 }
 

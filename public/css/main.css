@@ -716,6 +716,23 @@ body.light-theme .zen-textarea { background: rgba(0,0,0,0.02); }
 
 body.light-theme .zen-btn-ghost:hover { background: rgba(0,0,0,0.03); }
 
+/* Botón de "peligro suave": para acciones destructivas poco frecuentes (p. ej. Empezar de cero). */
+.zen-btn-danger-soft {
+  background: rgba(239, 68, 68, 0.08);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.zen-btn-danger-soft:hover {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.zen-btn-danger-soft:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ─────────────────────────────────────────────
    12. BREATHING CIRCLE
    ───────────────────────────────────────────── */
@@ -4127,3 +4144,9 @@ body.light-theme .zen-btn-primary { color: #fff; }
 .reminder-input { flex: 0 0 auto; width: 132px; min-width: 0; min-height: 40px; padding: 6px 10px; }
 .reminder-weekly { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .reminders-status { font-size: 13px; color: var(--text-secondary); margin-top: 10px; }
+
+/* Ventanas modales y tarjeta de acceso siguen la superficie del tema (legibles en temas claros). */
+.auth-card {
+  background: color-mix(in srgb, var(--content-surface-raised) 92%, transparent);
+  border-color: var(--hairline);
+}

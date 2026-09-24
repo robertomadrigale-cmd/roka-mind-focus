@@ -14,11 +14,13 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 import {
   diffModels,
+  emptySyncModel,
+  isRemoteResetNewer,
   legacyToModel,
   mergeModels,
   modelToState,
   stateToModel
-} from "../lib/sync-model.js?v=41-sync-v5";
+} from "../lib/sync-model.js?v=42-reset";
 
 const SYNC_BASE_KEY = 'rokaMindSyncBase';
 const MAX_BATCH_OPS = 400;
@@ -31,6 +33,10 @@ let unsubscribeFns = [];
 let lastSyncedModel = null;
 let pushPromise = null;
 let remoteRefreshPromise = null;
+let lastKnownResetAt = '';
+let resetGuard = false;
+// Cambia en cada reinicio o stopSync: los refrescos en vuelo de una época anterior se descartan.
+let syncEpoch = 0;
 
 function clone(value) {
   if (value === undefined) return undefined;
@@ -38,7 +44,7 @@ function clone(value) {
 }
 
 function emptyModel() {
-  return { schema: 5, collections: {}, singletons: {}, counters: {}, days: {} };
+  return emptySyncModel();
 }
 
 function storage() {
@@ -70,10 +76,22 @@ function readCachedBase(ownerUid) {
   }
 }
 
-function writeCachedBase(ownerUid, model) {
+function readCachedResetAt(ownerUid) {
+  try {
+    const parsed = JSON.parse(storage().getItem(SYNC_BASE_KEY) || '{}');
+    if (parsed?.ownerUid !== ownerUid) return '';
+    return parsed.resetAt || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeCachedBase(ownerUid, model, resetAt = lastKnownResetAt) {
+  lastKnownResetAt = resetAt || '';
   storage().setItem(SYNC_BASE_KEY, JSON.stringify({
     ownerUid,
     savedAt: new Date().toISOString(),
+    resetAt: lastKnownResetAt,
     model
   }));
 }
@@ -228,10 +246,12 @@ export function hasPendingChanges() {
 }
 
 async function refreshFromRemote() {
-  if (!uid || remoteRefreshPromise) return remoteRefreshPromise;
+  if (!uid || resetGuard || remoteRefreshPromise) return remoteRefreshPromise;
+  const epoch = syncEpoch;
   remoteRefreshPromise = (async () => {
     notifyStatus('applying');
     const remote = await readRemoteModel(400);
+    if (epoch !== syncEpoch || resetGuard) return;
     const local = stateToModel(callbacks.getState?.() || {}, { now: Date.now(), prevModel: lastSyncedModel || remote });
     const merged = mergeModels(local, remote);
     lastSyncedModel = remote;
@@ -247,12 +267,37 @@ async function refreshFromRemote() {
   return remoteRefreshPromise;
 }
 
+function handleRootSnapshot(snapshot) {
+  if (!snapshot.exists() || snapshot.metadata?.hasPendingWrites) return;
+  const remoteResetAt = snapshot.data()?.resetAt || '';
+  if (isRemoteResetNewer(lastKnownResetAt, remoteResetAt)) applyRemoteReset(remoteResetAt);
+}
+
+// Otro dispositivo ejecutó "Empezar de cero": se descarta el estado local y la base cacheada
+// SIN subir nada, para no resucitar datos que ya fueron borrados en la nube (§D del plan).
+function applyRemoteReset(remoteResetAt) {
+  resetGuard = true;
+  unsubscribeFns.forEach(unsubscribe => unsubscribe());
+  unsubscribeFns = [];
+  pushPromise = null;
+  remoteRefreshPromise = null;
+  lastSyncedModel = emptyModel();
+  writeCachedBase(uid, lastSyncedModel, remoteResetAt);
+  try {
+    callbacks.onReset?.();
+  } finally {
+    resetGuard = false;
+    if (uid) subscribeToRemoteChanges();
+  }
+}
+
 function subscribeToRemoteChanges() {
   const handleSnapshot = snapshot => {
     if (snapshot.metadata?.hasPendingWrites) return;
     refreshFromRemote();
   };
   unsubscribeFns = [
+    onSnapshot(userDocRef(), handleRootSnapshot),
     onSnapshot(userDocRef('sync', 'collections'), handleSnapshot),
     onSnapshot(userDocRef('sync', 'singletons'), handleSnapshot),
     onSnapshot(userDocRef('sync', 'counters'), handleSnapshot),
@@ -268,6 +313,22 @@ export async function startSync(ownerUid, options = {}) {
   notifyStatus(navigator.onLine === false ? 'offline' : 'saving');
 
   const rootSnap = await getDoc(userDocRef());
+  const rootData = rootSnap.exists() ? rootSnap.data() : {};
+  const remoteResetAt = rootData.resetAt || '';
+  const knownResetAt = readCachedResetAt(ownerUid);
+
+  if (isRemoteResetNewer(knownResetAt, remoteResetAt)) {
+    // Otro dispositivo reinició la cuenta antes de que este dispositivo se conectara:
+    // se descarta cualquier estado local pendiente y se arranca vacío, sin subir nada.
+    lastSyncedModel = emptyModel();
+    writeCachedBase(uid, lastSyncedModel, remoteResetAt);
+    callbacks.onInitialState?.(modelToState(lastSyncedModel, callbacks.baseState || {}));
+    subscribeToRemoteChanges();
+    notifyStatus('synced');
+    return;
+  }
+  lastKnownResetAt = remoteResetAt || knownResetAt || '';
+
   const migratedModel = await runMigrationIfNeeded(rootSnap);
   const remote = migratedModel || await readRemoteModel(400);
   const cachedBase = readCachedBase(uid);
@@ -278,7 +339,7 @@ export async function startSync(ownerUid, options = {}) {
   });
   const merged = mergeModels(local, remote);
   lastSyncedModel = remote;
-  writeCachedBase(uid, lastSyncedModel);
+  writeCachedBase(uid, lastSyncedModel, lastKnownResetAt);
   callbacks.onInitialState?.(modelToState(merged, callbacks.baseState || {}));
   subscribeToRemoteChanges();
   if (hasPendingChanges()) await pushChanges(true);
@@ -286,7 +347,7 @@ export async function startSync(ownerUid, options = {}) {
 }
 
 export async function pushChanges(quiet = false) {
-  if (!uid || !callbacks.getState) return;
+  if (!uid || !callbacks.getState || resetGuard) return;
   if (pushPromise) return pushPromise;
   pushPromise = (async () => {
     if (navigator.onLine === false) {
@@ -315,12 +376,75 @@ export async function pushChanges(quiet = false) {
 }
 
 export function stopSync(options = {}) {
+  syncEpoch++;
   unsubscribeFns.forEach(unsubscribe => unsubscribe());
   unsubscribeFns = [];
   uid = '';
   pushPromise = null;
   remoteRefreshPromise = null;
+  resetGuard = false;
   lastSyncedModel = null;
-  if (!options.keepBase) clearSyncBase();
+  if (!options.keepBase) {
+    clearSyncBase();
+    lastKnownResetAt = '';
+  }
+}
+
+// "Empezar de cero": borra todo el estado en la nube del usuario (colecciones sync, días,
+// hilos de coach con sus mensajes e informes) en batches de máx. 400 operaciones, y luego
+// reemplaza el documento raíz SIN merge para no conservar campos heredados del estado viejo.
+// Los respaldos de migración (`users/{uid}/backups/*`) son inmutables por reglas y no se tocan.
+export async function resetCloudData() {
+  if (!uid) throw new Error('syncService no está iniciado.');
+  const currentUid = uid;
+  // Mientras se borra, este mismo dispositivo no debe refrescar ni subir nada: sus listeners
+  // verían los borrados y podrían reponer el estado viejo.
+  const inflightPush = pushPromise;
+  resetGuard = true;
+  syncEpoch++;
+  unsubscribeFns.forEach(unsubscribe => unsubscribe());
+  unsubscribeFns = [];
+  remoteRefreshPromise = null;
+  try {
+  // Una subida que ya estaba en curso debe terminar ANTES de borrar; si no, podría aterrizar después.
+  if (inflightPush) await inflightPush.catch(() => {});
+  pushPromise = null;
+  const rootSnap = await getDoc(userDocRef());
+  const existingMigratedAt = rootSnap.exists() ? (rootSnap.data().migratedAt || '') : '';
+
+  const refsToDelete = [
+    docPathRef('sync/collections'),
+    docPathRef('sync/singletons'),
+    docPathRef('sync/counters')
+  ];
+
+  const daysSnap = await getDocs(collection(db, 'users', currentUid, 'days'));
+  daysSnap.forEach(dayDoc => refsToDelete.push(dayDoc.ref));
+
+  const threadsSnap = await getDocs(collection(db, 'users', currentUid, 'chatThreads'));
+  for (const threadDoc of threadsSnap.docs) {
+    const messagesSnap = await getDocs(collection(db, 'users', currentUid, 'chatThreads', threadDoc.id, 'messages'));
+    messagesSnap.forEach(messageDoc => refsToDelete.push(messageDoc.ref));
+    refsToDelete.push(threadDoc.ref);
+  }
+
+  const reportsSnap = await getDocs(collection(db, 'users', currentUid, 'reports'));
+  reportsSnap.forEach(reportDoc => refsToDelete.push(reportDoc.ref));
+
+  for (let index = 0; index < refsToDelete.length; index += MAX_BATCH_OPS) {
+    const batch = writeBatch(db);
+    refsToDelete.slice(index, index + MAX_BATCH_OPS).forEach(ref => batch.delete(ref));
+    await batch.commit();
+  }
+
+  const resetAt = new Date().toISOString();
+  await setDoc(userDocRef(), { schema: 5, migratedAt: existingMigratedAt || resetAt, resetAt });
+
+  lastSyncedModel = emptyModel();
+  writeCachedBase(currentUid, lastSyncedModel, resetAt);
+  return resetAt;
+  } finally {
+    resetGuard = false;
+  }
 }
 

@@ -10,6 +10,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   diffModels,
+  isRemoteResetNewer,
   legacyToModel,
   mergeModels,
   modelToState,
@@ -212,5 +213,96 @@ test('rules isolate owner data and protect backups from update/delete', async ()
   await assertFails(other.doc(`users/${UID}/backups/b2`).set({ stateVersion: 4 }));
   await assertFails(owner.doc(`users/${UID}/backups/b1`).update({ touched: true }));
   await assertFails(owner.doc(`users/${UID}/backups/b1`).delete());
+});
+
+// ─── "Empezar de cero" — dispositivo B no resucita datos tras el reinicio de A ───
+
+async function deleteAllUserData(db, uid) {
+  const refs = [
+    db.doc(`users/${uid}/sync/collections`),
+    db.doc(`users/${uid}/sync/singletons`),
+    db.doc(`users/${uid}/sync/counters`)
+  ];
+  const daysSnap = await db.collection(`users/${uid}/days`).get();
+  daysSnap.forEach(docSnap => refs.push(docSnap.ref));
+  const threadsSnap = await db.collection(`users/${uid}/chatThreads`).get();
+  for (const threadDoc of threadsSnap.docs) {
+    const messagesSnap = await threadDoc.ref.collection('messages').get();
+    messagesSnap.forEach(messageDoc => refs.push(messageDoc.ref));
+    refs.push(threadDoc.ref);
+  }
+  const reportsSnap = await db.collection(`users/${uid}/reports`).get();
+  reportsSnap.forEach(docSnap => refs.push(docSnap.ref));
+
+  const batch = db.batch();
+  refs.forEach(ref => batch.delete(ref));
+  await batch.commit();
+}
+
+test('device A resets the account; device B never re-uploads its stale pending edits and ends up empty', async () => {
+  const deviceA = testEnv.authenticatedContext(UID).firestore();
+  const deviceB = testEnv.authenticatedContext(UID).firestore();
+  const baseState = fixtureState();
+  const baseModel = stateToModel(baseState, { now: 100 });
+
+  await testEnv.withSecurityRulesDisabled(async context => {
+    await writeFullModel(context.firestore(), UID, baseModel);
+    await context.firestore().doc(`users/${UID}`).set({ schema: 5, migratedAt: '2026-09-23T18:00:00.000Z' });
+    await context.firestore().doc(`users/${UID}/chatThreads/t1`).set({ id: 't1', title: 'Hola' });
+    await context.firestore().doc(`users/${UID}/chatThreads/t1/messages/m1`).set({ id: 'm1', role: 'user', content: 'hola' });
+    await context.firestore().doc(`users/${UID}/reports/r1`).set({ id: 'r1', title: 'Informe' });
+  });
+
+  // Ambos dispositivos parten con la misma base cacheada y ningún resetAt conocido todavía.
+  let knownResetAtB = '';
+
+  // Device B edita localmente (por ejemplo, cambia una meta) pero SU push todavía no se ha
+  // enviado (debounce en curso) cuando llega el reinicio de A.
+  const bState = modelToState(baseModel, {});
+  bState.smartGoals[0].nextStep = 'Cambio local de B, nunca debe llegar a la nube';
+  const bPendingModel = stateToModel(bState, { now: 250, prevModel: baseModel });
+  const bPendingWrites = diffModels(baseModel, bPendingModel);
+  assert.ok(bPendingWrites.length > 0, 'debe haber cambios locales pendientes en B antes del reinicio');
+
+  // Device A ejecuta "Empezar de cero": borra todo y reemplaza el documento raíz SIN merge.
+  await deleteAllUserData(deviceA, UID);
+  const resetAt = new Date().toISOString();
+  await deviceA.doc(`users/${UID}`).set({ schema: 5, migratedAt: '2026-09-23T18:00:00.000Z', resetAt });
+
+  // Device B se reconecta: lee el documento raíz y decide, con la misma lógica pura que usa
+  // syncService.startSync, si debe descartar su estado y su base sin subir nada.
+  const rootSnap = await deviceB.doc(`users/${UID}`).get();
+  const remoteResetAt = rootSnap.data()?.resetAt || '';
+  const mustDiscard = isRemoteResetNewer(knownResetAtB, remoteResetAt);
+  assert.equal(mustDiscard, true);
+
+  // Si mustDiscard es true, syncService NUNCA llama a pushChanges: B no debe escribir sus
+  // bPendingWrites. Simplemente actualiza su base cacheada y arranca vacío.
+  knownResetAtB = remoteResetAt;
+  if (!mustDiscard) {
+    await applyWrites(deviceB, UID, bPendingWrites); // esto NO debe ejecutarse en este escenario
+  }
+
+  const remoteAfter = await readRemoteModel(deviceA, UID);
+  const finalB = modelToState(remoteAfter, {});
+
+  assert.deepEqual(remoteAfter.collections, {});
+  assert.deepEqual(remoteAfter.singletons, {});
+  assert.deepEqual(remoteAfter.days, {});
+  assert.equal(finalB.smartGoals.length, 0);
+  assert.notEqual(
+    JSON.stringify(finalB.smartGoals),
+    JSON.stringify([{ ...baseState.smartGoals[0], nextStep: 'Cambio local de B, nunca debe llegar a la nube' }])
+  );
+
+  const threadsAfter = await deviceA.collection(`users/${UID}/chatThreads`).get();
+  const reportsAfter = await deviceA.collection(`users/${UID}/reports`).get();
+  assert.equal(threadsAfter.size, 0);
+  assert.equal(reportsAfter.size, 0);
+
+  const rootAfter = await deviceA.doc(`users/${UID}`).get();
+  assert.equal(rootAfter.data().schema, 5);
+  assert.equal(rootAfter.data().resetAt, resetAt);
+  assert.equal(rootAfter.data().migratedAt, '2026-09-23T18:00:00.000Z');
 });
 

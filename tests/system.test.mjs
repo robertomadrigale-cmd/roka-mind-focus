@@ -24,6 +24,7 @@ test('migrateState applies v4 defaults without deleting existing fields', () => 
     customField: 'keep-me',
     smartGoals: [{ id: 'g1', goal: 'Meta', completed: true, progress: 120 }],
     rituals: [{ id: 'r1', name: 'Meditar' }],
+    // Los campos viejos de herramientas eliminadas (mapa personal, etc.) se ignoran, no se borran.
     personalMap: { archetype: 'creator' }
   });
   assert.equal(migrated.stateVersion, 4);
@@ -32,11 +33,7 @@ test('migrateState applies v4 defaults without deleting existing fields', () => 
   assert.equal(migrated.smartGoals[0].progress, 100);
   assert.equal(migrated.smartGoals[0].big5Index, null);
   assert.equal(migrated.rituals[0].goalId, '');
-  assert.equal(migrated.settings.advancedTools, true);
-});
-
-test('migrateState hides advanced tools for new users by default', () => {
-  assert.equal(migrateState({}).settings.advancedTools, false);
+  assert.deepEqual(migrated.personalMap, { archetype: 'creator' });
 });
 
 test('weekStats counts tasks, rituals, focus sessions and active days', () => {
