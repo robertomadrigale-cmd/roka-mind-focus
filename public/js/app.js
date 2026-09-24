@@ -5,7 +5,7 @@ import { Timer } from "./components/Timer.js";
 import { LifeWheel, LIFE_WHEEL_AXES } from "./components/LifeWheel.js";
 import { localDateKey } from "./lib/dates.js";
 import { choosePersistedState, hasMeaningfulUserData, jsonSizeBytes, pruneStateForCloud, selectLocalCandidateForUser } from "./lib/persistence.js";
-import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, migrateState as migrateSystemState, overdueTasks, ritualAdherence, shouldPromptWeeklyReview, weekKey, weekStats } from "./lib/system.js";
+import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, lowLifeAreasNeedingAction, migrateState as migrateSystemState, overdueTasks, ritualAdherence, shouldPromptWeeklyReview, weekKey, weekStats } from "./lib/system.js";
 import { callAIGateway } from "./services/aiGateway.js?v=10.10";
 import { WEEK_DAYS, buildRemindersICS, dueReminder, markReminderShown, normalizeReminders } from "./lib/reminders.js?v=45";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
@@ -1177,18 +1177,31 @@ function renderGoalNextStepsCard() {
   }));
 }
 
+const LOW_AREAS_DISMISSED_KEY = 'rokaMindLowAreasDismissed';
+
+function readDismissedLowAreas() {
+  try { return JSON.parse(localStorage.getItem(LOW_AREAS_DISMISSED_KEY) || '{}'); } catch { return {}; }
+}
+
 function renderLowLifeAreasCard() {
   const c = $('#low-life-areas-card');
   if (!c) return;
-  const areas = lowLifeAreas(state, 4);
+  const areas = lowLifeAreasNeedingAction(state, { today: todayStr(), dismissed: readDismissedLowAreas() }).slice(0, 2);
   if (!areas.length) { c.innerHTML = ''; return; }
-  c.innerHTML = `<div class="glass-card today-system-card"><div class="card-header"><div class="card-title-group"><div class="card-icon green"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><h2 class="card-title">Áreas bajas de la Rueda</h2></div></div><div class="low-area-list">${areas.slice(0, 4).map(area => `<div class="low-area-item"><div><strong>${esc(getLifeAreaLabel(area.key))}</strong><span>${area.value}/10</span></div><button class="zen-btn zen-btn-primary" data-life-goal="${esc(area.key)}">Crear meta</button><button class="zen-btn zen-btn-ghost" data-life-ritual="${esc(area.key)}">Crear ritual</button></div>`).join('')}</div></div>`;
+  c.innerHTML = `<div class="glass-card today-system-card low-areas-card"><div class="card-title-group"><div class="card-icon green"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></div><div><h2 class="card-title">Un área de tu vida pide atención</h2><p class="card-subtitle">Según tu Rueda de la Vida. Desaparece cuando la trabajas con una meta o un ritual.</p></div></div><div class="low-area-list">${areas.map(area => `<div class="low-area-item"><div class="low-area-name"><strong>${esc(getLifeAreaLabel(area.key))}</strong><span class="cal-status-pill">${area.value}/10</span></div><div class="low-area-actions"><button class="zen-btn zen-btn-primary" data-life-goal="${esc(area.key)}">Crear meta</button><button class="zen-btn zen-btn-ghost" data-life-ritual="${esc(area.key)}">Crear ritual</button><button class="zen-btn zen-btn-ghost low-area-dismiss" data-life-dismiss="${esc(area.key)}" aria-label="Ahora no" title="Ahora no (ocultar 14 días)"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div></div>`).join('')}</div></div>`;
   c.querySelectorAll('[data-life-goal]').forEach(button => button.addEventListener('click', () => openSmartForm({ lifeArea: button.dataset.lifeGoal })));
   c.querySelectorAll('[data-life-ritual]').forEach(button => button.addEventListener('click', () => {
     switchTab('metas', { focus: true });
     activateSubtab('metas', 'strat-habits', true);
     $('#ritual-input')?.focus();
     $('#ritual-life-area') && ($('#ritual-life-area').value = button.dataset.lifeRitual);
+  }));
+  c.querySelectorAll('[data-life-dismiss]').forEach(button => button.addEventListener('click', () => {
+    const dismissed = readDismissedLowAreas();
+    dismissed[button.dataset.lifeDismiss] = todayStr();
+    try { localStorage.setItem(LOW_AREAS_DISMISSED_KEY, JSON.stringify(dismissed)); } catch {}
+    renderLowLifeAreasCard();
+    showToast('Oculto por 14 días');
   }));
 }
 
@@ -1236,7 +1249,7 @@ function initRituals() {
   $('#edit-ritual-days-btn')?.addEventListener('click',()=>{switchTab('metas',{focus:true});activateSubtab('metas','strat-habits',true);});
 }
 // Desde "Hoy" el ritual se crea programado todos los días; desde "Semanal" se eligen los días en la tabla.
-function addRitual(inputSelector='#ritual-input', everyDay=false) { const i=$(inputSelector),n=i?.value.trim(); if(!n)return; if(state.rituals.length>=10){showToast('Máximo 10 rituales');return;} const goalId=(everyDay?$('#daily-ritual-goal'):$('#ritual-goal'))?.value||''; const lifeArea=$('#ritual-life-area')?.value||''; state.rituals.push({id:gid(),name:n,goalId,lifeArea,createdAt:new Date().toISOString(),days:{lun:everyDay,mar:everyDay,mie:everyDay,jue:everyDay,vie:everyDay,sab:everyDay,dom:everyDay},completions:{}}); saveState();i.value='';renderRituals();renderDailyRitualsQuick();renderSmartGoals();showToast(everyDay?'Ritual diario agregado':'Ritual agregado'); }
+function addRitual(inputSelector='#ritual-input', everyDay=false) { const i=$(inputSelector),n=i?.value.trim(); if(!n)return; if(state.rituals.length>=10){showToast('Máximo 10 rituales');return;} const goalId=(everyDay?$('#daily-ritual-goal'):$('#ritual-goal'))?.value||''; const lifeArea=everyDay?'':($('#ritual-life-area')?.value||''); state.rituals.push({id:gid(),name:n,goalId,lifeArea,createdAt:new Date().toISOString(),days:{lun:everyDay,mar:everyDay,mie:everyDay,jue:everyDay,vie:everyDay,sab:everyDay,dom:everyDay},completions:{}}); saveState();i.value='';renderRituals();renderDailyRitualsQuick();renderSmartGoals();showToast(everyDay?'Ritual diario agregado':'Ritual agregado'); }
 function renderRituals() {
   const c=$('#rituals-container'); if(!c)return;
   if(!state.rituals.length){c.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg class="icon" aria-hidden="true"><use href="#i-repeat"/></svg></div><div class="empty-state-text">Agrega tu primer ritual</div><button class="zen-btn zen-btn-primary" id="empty-rituals-btn">Agregar mi primer ritual</button></div>';c.querySelector('#empty-rituals-btn')?.addEventListener('click',()=>$('#ritual-input')?.focus());return;}
@@ -2931,7 +2944,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v50-empty-goals'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v51-low-areas'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

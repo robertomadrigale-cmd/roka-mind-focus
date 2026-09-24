@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v50-empty-goals';
+const CACHE_NAME = 'roka-mind-v51-low-areas';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;
