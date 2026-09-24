@@ -207,18 +207,28 @@ export function migrateState(input = {}) {
   return next;
 }
 
-export function shouldPromptWeeklyReview(state, today = localDateKey()) {
+const REVIEW_DAY_INDEX = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+// Aviso de revisión semanal:
+// - no aparece si ya hubo revisión (o se descartó el aviso) en los últimos 3 días;
+// - aparece el día elegido para la revisión y el día siguiente;
+// - fuera de ese día solo aparece si la última revisión tiene más de 8 días.
+export function shouldPromptWeeklyReview(state, today = localDateKey(), options = {}) {
   const data = state || {};
   today = toDateKey(today);
-  const currentWeek = weekKey(today);
-  if ((data.weeklyReviews || []).some(review => review.weekKey === currentWeek)) return false;
-  const day = dateFromKey(today).getDay();
-  const isReviewWindow = [0, 1, 5, 6].includes(day);
-  const last = [...(data.weeklyReviews || [])].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0];
-  const lastDate = last?.createdAt ? localDateKey(last.createdAt) : data.sectionDates?.weekly;
-  if (!lastDate) return isReviewWindow;
-  const elapsed = Math.floor((dateFromKey(today) - dateFromKey(lastDate)) / DAY_MS);
-  return isReviewWindow || elapsed > 7;
+  const todayDate = dateFromKey(today);
+  const daysSince = key => Math.floor((todayDate - dateFromKey(key)) / DAY_MS);
+  const reviewDates = (data.weeklyReviews || [])
+    .map(review => (review.createdAt ? localDateKey(review.createdAt) : ''))
+    .filter(Boolean)
+    .sort();
+  const lastReview = reviewDates[reviewDates.length - 1] || '';
+  if (lastReview && daysSince(lastReview) <= 3) return false;
+  if (options.dismissedOn && daysSince(toDateKey(options.dismissedOn)) < 3) return false;
+  const reviewDay = REVIEW_DAY_INDEX[options.weeklyDay] ?? 0;
+  const day = todayDate.getDay();
+  if (day === reviewDay || day === (reviewDay + 1) % 7) return true;
+  return Boolean(lastReview) && daysSince(lastReview) > 8;
 }
 
 export function lowLifeAreas(state, threshold = 4) {

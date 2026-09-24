@@ -1122,12 +1122,21 @@ function renderTodaySystem() {
   renderLowLifeAreasCard();
 }
 
+const WEEKLY_PROMPT_DISMISSED_KEY = 'rokaMindWeeklyPromptDismissed';
+
 function renderWeeklyPrompt() {
   const c = $('#weekly-review-prompt');
   if (!c) return;
-  if (!shouldPromptWeeklyReview(state, todayStr())) { c.innerHTML = ''; return; }
-  c.innerHTML = `<div class="glass-card today-alert-card"><div><span class="page-eyebrow">Revisión semanal</span><h2>Cierra tu semana en 10 minutos</h2><p>Revisa qué funcionó, ajusta metas y elige hasta 3 focos para la próxima semana.</p></div><button class="zen-btn zen-btn-primary" id="start-weekly-review-btn">Empezar revisión</button></div>`;
+  let dismissedOn = '';
+  try { dismissedOn = localStorage.getItem(WEEKLY_PROMPT_DISMISSED_KEY) || ''; } catch {}
+  if (!shouldPromptWeeklyReview(state, todayStr(), { weeklyDay: getReminders().weeklyDay, dismissedOn })) { c.innerHTML = ''; return; }
+  c.innerHTML = `<div class="glass-card today-alert-card"><div><span class="page-eyebrow">Revisión semanal</span><h2>Cierra tu semana en 10 minutos</h2><p>Revisa qué funcionó, ajusta metas y elige hasta 3 focos para la próxima semana.</p></div><div class="today-card-actions"><button class="zen-btn zen-btn-primary" id="start-weekly-review-btn">Empezar revisión</button><button class="zen-btn zen-btn-ghost" id="dismiss-weekly-review-btn">Ahora no</button></div></div>`;
   c.querySelector('#start-weekly-review-btn')?.addEventListener('click', () => { switchTab('semana', { focus: true }); activateSubtab('semana', 'reflection-weekly', true); });
+  c.querySelector('#dismiss-weekly-review-btn')?.addEventListener('click', () => {
+    try { localStorage.setItem(WEEKLY_PROMPT_DISMISSED_KEY, todayStr()); } catch {}
+    c.innerHTML = '';
+    showToast('Te lo recordaremos en unos días');
+  });
 }
 
 function renderOverdueTasksCard() {
@@ -2922,7 +2931,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v48-hoy-order'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v49-weekly-prompt'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

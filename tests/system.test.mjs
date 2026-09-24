@@ -104,9 +104,25 @@ test('completeTaskEffects clears matching goal next step and marks follow-up', (
   assert.equal(next.dailyTasks['2026-09-23'][0].completed, true);
 });
 
-test('shouldPromptWeeklyReview prompts in review window when current week has no review', () => {
-  assert.equal(shouldPromptWeeklyReview({ weeklyReviews: [] }, '2026-09-25'), true);
-  assert.equal(shouldPromptWeeklyReview({ weeklyReviews: [{ weekKey: '2026-09-21' }] }, '2026-09-25'), false);
+test('shouldPromptWeeklyReview only prompts on the chosen review day and the day after', () => {
+  // 2026-09-23 miércoles, 27 domingo, 28 lunes, 29 martes
+  assert.equal(shouldPromptWeeklyReview({ weeklyReviews: [] }, '2026-09-23'), false);
+  assert.equal(shouldPromptWeeklyReview({ weeklyReviews: [] }, '2026-09-27'), true);
+  assert.equal(shouldPromptWeeklyReview({ weeklyReviews: [] }, '2026-09-28'), true);
+  assert.equal(shouldPromptWeeklyReview({ weeklyReviews: [] }, '2026-09-29'), false);
+  assert.equal(shouldPromptWeeklyReview({ weeklyReviews: [] }, '2026-09-25', { weeklyDay: 'FR' }), true);
+});
+
+test('shouldPromptWeeklyReview does not repeat the day after a Sunday review', () => {
+  const state = { weeklyReviews: [{ weekKey: '2026-09-21', createdAt: '2026-09-27T20:00:00' }] };
+  assert.equal(shouldPromptWeeklyReview(state, '2026-09-28'), false);
+});
+
+test('shouldPromptWeeklyReview nudges when overdue and respects a recent dismissal', () => {
+  const state = { weeklyReviews: [{ weekKey: '2026-09-07', createdAt: '2026-09-13T20:00:00' }] };
+  assert.equal(shouldPromptWeeklyReview(state, '2026-09-23'), true);
+  assert.equal(shouldPromptWeeklyReview(state, '2026-09-23', { dismissedOn: '2026-09-22' }), false);
+  assert.equal(shouldPromptWeeklyReview(state, '2026-09-26', { dismissedOn: '2026-09-22' }), true);
 });
 
 test('lowLifeAreas returns areas at or below threshold', () => {
