@@ -1,5 +1,15 @@
 {
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/dates.test.mjs tests/functions-validate.test.mjs tests/persistence.test.mjs tests/system.test.mjs tests/sync-model.test.mjs tests/reminders.test.mjs",
+    "test:emulator": "node scripts/test-emulator.mjs"
+  },
   "dependencies": {
     "puppeteer": "^25.1.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.19.0",
+    "firebase-tools": "^15.31.0"
   }
 }

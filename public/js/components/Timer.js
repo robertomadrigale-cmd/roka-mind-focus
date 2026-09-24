@@ -1,11 +1,62 @@
 const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * 100;
+const BREATHING_PATTERNS = {
+  resonance: {
+    className: 'pattern-resonance',
+    cycleTime: 10000,
+    steps: [{ ms: 0, text: 'Inhala suave...' }, { ms: 5000, text: 'Exhala lento...' }]
+  },
+  box: {
+    className: 'pattern-box',
+    cycleTime: 16000,
+    steps: [
+      { ms: 0, text: 'Inhala...' },
+      { ms: 4000, text: 'Mantén...' },
+      { ms: 8000, text: 'Exhala...' },
+      { ms: 12000, text: 'Mantén...' }
+    ]
+  },
+  relax: {
+    className: 'pattern-relax',
+    cycleTime: 19000,
+    steps: [
+      { ms: 0, text: 'Inhala...' },
+      { ms: 4000, text: 'Mantén...' },
+      { ms: 11000, text: 'Exhala largo...' }
+    ]
+  },
+  extended: {
+    className: 'pattern-extended',
+    cycleTime: 10000,
+    steps: [{ ms: 0, text: 'Inhala por nariz...' }, { ms: 4000, text: 'Exhala más largo...' }]
+  },
+  sigh: {
+    className: 'pattern-sigh',
+    cycleTime: 9000,
+    steps: [
+      { ms: 0, text: 'Inhala...' },
+      { ms: 1800, text: 'Completa un poco más...' },
+      { ms: 3000, text: 'Suelta largo...' }
+    ]
+  },
+  diaphragm: {
+    className: 'pattern-diaphragm',
+    cycleTime: 9000,
+    steps: [{ ms: 0, text: 'Expande abdomen...' }, { ms: 3000, text: 'Exhala sin prisa...' }]
+  },
+  pursed: {
+    className: 'pattern-pursed',
+    cycleTime: 6000,
+    steps: [{ ms: 0, text: 'Inhala nariz...' }, { ms: 2000, text: 'Exhala labios suaves...' }]
+  }
+};
+const BREATHING_PATTERN_CLASSES = Object.values(BREATHING_PATTERNS).map(pattern => pattern.className);
 
 export class Timer {
   constructor({ $, $$, onComplete }) {
     this.$ = $;
     this.$$ = $$;
     this.onComplete = onComplete;
-    this.state = { minutes: 25, seconds: 0, running: false, interval: null, totalSeconds: 1500 };
+    this.state = { minutes: 25, seconds: 0, running: false, interval: null, totalSeconds: 1500, remainingMs: 1500000, endAt: 0 };
     this.activePattern = 'resonance';
     this.breathingInterval = null;
     this.audioCtx = null;
@@ -20,6 +71,9 @@ export class Timer {
     if (startBtn) startBtn.addEventListener('click', () => this.toggle());
     if (resetBtn) resetBtn.addEventListener('click', () => this.reset());
     if (focusBtn) focusBtn.addEventListener('click', () => this.toggleDeepFocus());
+    document.addEventListener('visibilitychange', () => {
+      if (this.state.running) this.tick();
+    });
 
     const timerContainer = document.querySelector('.timer-container');
     if (timerContainer) {
@@ -39,7 +93,7 @@ export class Timer {
           if (this.state.running) return;
           this.$$('.pattern-btn').forEach(x => x.classList.remove('active'));
           patternBtn.classList.add('active');
-          this.activePattern = patternBtn.dataset.pattern;
+          this.activePattern = BREATHING_PATTERNS[patternBtn.dataset.pattern] ? patternBtn.dataset.pattern : 'resonance';
         }
       });
     }
@@ -51,6 +105,8 @@ export class Timer {
     this.state.minutes = minutes;
     this.state.seconds = 0;
     this.state.totalSeconds = minutes * 60;
+    this.state.remainingMs = this.state.totalSeconds * 1000;
+    this.state.endAt = 0;
     this.updateDisplay();
   }
 
@@ -59,10 +115,13 @@ export class Timer {
   }
 
   start() {
+    const currentRemaining = this.getRemainingSeconds() || this.state.totalSeconds;
     this.state.running = true;
+    this.state.remainingMs = currentRemaining * 1000;
+    this.state.endAt = Date.now() + this.state.remainingMs;
     const startBtn = this.$('#timer-start-btn');
     if (startBtn) {
-      startBtn.textContent = '⏸ Pausar';
+      startBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-pause"/></svg> Pausar';
       startBtn.className = 'zen-btn zen-btn-gold';
     }
 
@@ -71,8 +130,9 @@ export class Timer {
     // Add the specific pattern class to the circle
     const circle = this.$('#timer-circle-container');
     if (circle) {
-      circle.classList.remove('pattern-resonance', 'pattern-box', 'pattern-relax');
-      circle.classList.add(`pattern-${this.activePattern}`);
+      const pattern = BREATHING_PATTERNS[this.activePattern] || BREATHING_PATTERNS.resonance;
+      circle.classList.remove(...BREATHING_PATTERN_CLASSES);
+      circle.classList.add(pattern.className);
     }
     
     const breathingText = this.$('#breathing-text');
@@ -80,35 +140,27 @@ export class Timer {
 
     this.startBreathingCycle();
 
-    this.state.interval = setInterval(() => {
-      if (this.state.seconds === 0) {
-        if (this.state.minutes === 0) {
-          this.complete();
-          return;
-        }
-        this.state.minutes--;
-        this.state.seconds = 59;
-      } else {
-        this.state.seconds--;
-      }
-      this.updateDisplay();
-    }, 1000);
+    this.tick();
+    this.state.interval = setInterval(() => this.tick(), 1000);
   }
 
   pause() {
+    if (this.state.running) this.state.remainingMs = Math.max(0, this.state.endAt - Date.now());
     this.state.running = false;
     clearInterval(this.state.interval);
+    this.state.interval = null;
+    this.state.endAt = 0;
     this.stopBreathingCycle();
 
     const startBtn = this.$('#timer-start-btn');
     if (startBtn) {
-      startBtn.textContent = '▶ Continuar';
+      startBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Continuar';
       startBtn.className = 'zen-btn zen-btn-primary';
     }
     document.body.classList.remove('meditation-fullscreen-active');
     
     const circle = this.$('#timer-circle-container');
-    if (circle) circle.classList.remove('pattern-resonance', 'pattern-box', 'pattern-relax');
+    if (circle) circle.classList.remove(...BREATHING_PATTERN_CLASSES);
     
     const breathingText = this.$('#breathing-text');
     if (breathingText) breathingText.style.display = 'none';
@@ -125,8 +177,10 @@ export class Timer {
     this.state.minutes = minutes;
     this.state.seconds = 0;
     this.state.totalSeconds = minutes * 60;
+    this.state.remainingMs = this.state.totalSeconds * 1000;
+    this.state.endAt = 0;
     const startBtn = this.$('#timer-start-btn');
-    if (startBtn) startBtn.textContent = '▶ Iniciar';
+    if (startBtn) startBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Iniciar';
     this.updateDisplay();
   }
 
@@ -148,31 +202,25 @@ export class Timer {
     if (progress) progress.setAttribute('stroke-dashoffset', CIRCLE_CIRCUMFERENCE * (1 - percent));
   }
 
+  getRemainingSeconds() {
+    if (this.state.running && this.state.endAt) return Math.max(0, Math.ceil((this.state.endAt - Date.now()) / 1000));
+    if (this.state.remainingMs !== undefined) return Math.max(0, Math.ceil(this.state.remainingMs / 1000));
+    return Math.max(0, this.state.minutes * 60 + this.state.seconds);
+  }
+
+  tick() {
+    const remainingSeconds = this.getRemainingSeconds();
+    this.state.minutes = Math.floor(remainingSeconds / 60);
+    this.state.seconds = remainingSeconds % 60;
+    this.state.remainingMs = remainingSeconds * 1000;
+    this.updateDisplay();
+    if (remainingSeconds <= 0) this.complete();
+  }
+
   startBreathingCycle() {
     this.stopBreathingCycle();
-    
-    let cycleTime = 10000;
-    let steps = [];
-    
-    if (this.activePattern === 'resonance') {
-      cycleTime = 10000;
-      steps = [{ ms: 0, text: 'Inhala...' }, { ms: 5000, text: 'Exhala...' }];
-    } else if (this.activePattern === 'box') {
-      cycleTime = 16000;
-      steps = [
-        { ms: 0, text: 'Inhala...' },
-        { ms: 4000, text: 'Mantén...' },
-        { ms: 8000, text: 'Exhala...' },
-        { ms: 12000, text: 'Mantén...' }
-      ];
-    } else if (this.activePattern === 'relax') {
-      cycleTime = 19000;
-      steps = [
-        { ms: 0, text: 'Inhala...' },
-        { ms: 4000, text: 'Mantén...' },
-        { ms: 11000, text: 'Exhala...' }
-      ];
-    }
+    const pattern = BREATHING_PATTERNS[this.activePattern] || BREATHING_PATTERNS.resonance;
+    const { cycleTime, steps } = pattern;
 
     const runCycle = () => {
       const el = this.$('#breathing-text');
@@ -203,17 +251,17 @@ export class Timer {
     if (isActive) {
       document.body.classList.remove('meditation-fullscreen-active');
       const circle = this.$('#timer-circle-container');
-      if (circle) circle.classList.remove('pattern-resonance', 'pattern-box', 'pattern-relax');
+      if (circle) circle.classList.remove(...BREATHING_PATTERN_CLASSES);
       const breathingText = this.$('#breathing-text');
       if (breathingText && !this.state.running) breathingText.style.display = 'none';
     }
     const btn = this.$('#deep-focus-btn');
     if (!btn) return;
     if (document.body.classList.contains('deep-focus-active') || document.body.classList.contains('meditation-fullscreen-active')) {
-      btn.textContent = '✕ Salir';
+      btn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-x"/></svg> Salir';
       btn.className = 'zen-btn zen-btn-primary';
     } else {
-      btn.textContent = '◉ Foco Total';
+      btn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-circle-dot"/></svg> Foco Total';
       btn.className = 'zen-btn zen-btn-ghost';
     }
   }

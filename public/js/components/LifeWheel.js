@@ -17,9 +17,9 @@ const RADIUS = 120;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export class LifeWheel {
-  constructor({ $, state, saveState }) {
+  constructor({ $, getState, saveState }) {
     this.$ = $;
-    this.state = state;
+    this.getState = getState;
     this.saveState = saveState;
     this.dragAxis = null;
     this.boundSvg = null;
@@ -29,6 +29,7 @@ export class LifeWheel {
     const svg = this.$('#life-wheel-svg');
     if (!svg) return;
     svg.innerHTML = '';
+    const state = this.getState();
     const axisCount = LIFE_WHEEL_AXES.length;
     const angleStep = 360 / axisCount;
 
@@ -53,7 +54,7 @@ export class LifeWheel {
       line.setAttribute('class', 'wheel-grid-line');
       svg.appendChild(line);
 
-      const score = this.state.lifeWheel[axis.key] || 5;
+      const score = state.lifeWheel[axis.key] || 5;
       const handlePoint = this.polar(i * angleStep, (score / 10) * RADIUS);
       const handle = document.createElementNS(SVG_NS, 'circle');
       handle.setAttribute('cx', handlePoint.x);
@@ -73,7 +74,7 @@ export class LifeWheel {
     });
 
     const dataPoints = LIFE_WHEEL_AXES.map((axis, i) => {
-      const score = this.state.lifeWheel[axis.key] || 5;
+      const score = state.lifeWheel[axis.key] || 5;
       const point = this.polar(i * angleStep, (score / 10) * RADIUS);
       return `${point.x},${point.y}`;
     });
@@ -89,9 +90,10 @@ export class LifeWheel {
   renderScores() {
     const container = this.$('#wheel-scores');
     if (!container) return;
+    const state = this.getState();
     container.innerHTML = LIFE_WHEEL_AXES.map(axis => `
       <div class="wheel-score-item">
-        <span class="wheel-score-value">${this.state.lifeWheel[axis.key] || 5}</span>
+        <span class="wheel-score-value">${state.lifeWheel[axis.key] || 5}</span>
         <span class="wheel-score-label">${axis.label}</span>
       </div>
     `).join('');
@@ -128,7 +130,7 @@ export class LifeWheel {
     const dx = mouseX - CENTER_X;
     const dy = mouseY - CENTER_Y;
     const score = Math.max(1, Math.min(10, Math.round(Math.sqrt(dx * dx + dy * dy) / RADIUS * 10)));
-    this.state.lifeWheel[LIFE_WHEEL_AXES[this.dragAxis].key] = score;
+    this.getState().lifeWheel[LIFE_WHEEL_AXES[this.dragAxis].key] = score;
     this.render();
   }
 
