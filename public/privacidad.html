@@ -36,25 +36,26 @@
       </ul>
 
       <h2>2. Almacenamiento y sincronización</h2>
-      <p>Los datos se guardan en tu navegador para funcionamiento offline y se sincronizan con Firebase Firestore cuando inicias sesión. El estado local queda marcado por cuenta para evitar que otro usuario del mismo navegador reciba datos anteriores.</p>
+      <p>Los datos se guardan en tu navegador para funcionamiento offline y se sincronizan con Firebase Firestore (Google Cloud) cuando inicias sesión. Cada elemento (meta, tarea, ritual, registro) se sincroniza por separado para que puedas usar la app en varios dispositivos sin perder cambios.</p>
+      <p>Al actualizar al formato de sincronización se guarda una <strong>copia de respaldo</strong> de tus datos en tu propia cuenta, que solo tú puedes leer y que no se puede modificar. El estado local queda marcado por cuenta y se borra al cerrar sesión, para evitar que otro usuario del mismo navegador reciba tus datos.</p>
 
       <h2>3. Uso de IA y transferencia a terceros</h2>
       <p>Cuando usas el Coach, rutas o informes, ROKA puede enviar a proveedores de IA el texto de tu conversación, el prompt solicitado y el contexto que autorices con los interruptores de la app. Si activas contexto sensible, también pueden enviarse miedos, historia personal y datos de nacimiento.</p>
       <ul>
-        <li><strong>OpenAI:</strong> se usa mediante el gateway del servidor cuando está configurado.</li>
-        <li><strong>Google Gemini:</strong> puede usarse por gateway o llamada directa desde tu navegador si aportas tu API key.</li>
-        <li><strong>DeepSeek:</strong> puede usarse por gateway o llamada directa desde tu navegador si aportas tu API key. DeepSeek puede procesar datos fuera de México.</li>
+        <li><strong>OpenAI</strong> (Estados Unidos), <strong>Google Gemini</strong> (Estados Unidos) o <strong>DeepSeek</strong> (China): con tu propia API key, la solicitud va directamente de tu navegador al proveedor que elijas. Si el servidor de ROKA tiene un proveedor configurado, la solicitud puede pasar por él.</li>
+        <li>Estos proveedores procesan los datos fuera de México conforme a sus propias políticas de privacidad. Elige el proveedor y el contexto que compartes según tu nivel de comodidad.</li>
       </ul>
       <p>La API key de IA la aporta el usuario. Por defecto se guarda solo en sessionStorage; solo se conserva en localStorage si marcas "Recordar en este dispositivo". No se guarda en Firestore.</p>
 
       <h2>4. Cómo desactivar IA o reducir contexto</h2>
       <p>Puedes borrar la API key desde Perfil, elegir no recordar la llave, cambiar proveedor/modelo o desactivar los interruptores de contexto de metas/progreso e historia personal/bloqueos. Si no usas Coach ni informes, esos textos no se envían a proveedores de IA.</p>
 
-      <h2>5. Cookies y almacenamiento local</h2>
-      <p>La app usa almacenamiento local esencial para sesión, preferencias, progreso offline y caché de PWA. Actualmente no carga analytics.</p>
+      <h2>5. Cookies, almacenamiento local y recordatorios</h2>
+      <p>La app usa almacenamiento local esencial para sesión, preferencias, progreso offline y caché de PWA. Actualmente no carga analytics ni publicidad.</p>
+      <p>Los recordatorios son opcionales: el archivo de calendario se genera en tu dispositivo y los avisos solo se muestran si concedes el permiso de notificaciones. ROKA no envía notificaciones desde un servidor.</p>
 
-      <h2>6. Control de tus datos</h2>
-      <p>Puedes editar o exportar datos desde la app. Para solicitar eliminación completa de datos en la nube, contacta al responsable del servicio.</p>
+      <h2>6. Control de tus datos (derechos ARCO)</h2>
+      <p>Puedes consultar, editar y descargar tus datos en cualquier momento desde Perfil → "Descargar mis datos". Conforme a la Ley Federal de Protección de Datos Personales en Posesión de los Particulares, puedes ejercer tus derechos de Acceso, Rectificación, Cancelación y Oposición, incluida la eliminación completa de tus datos en la nube y de sus respaldos, contactando al responsable del servicio.</p>
     </div>
   </div>
 </body>

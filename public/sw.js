@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roka-mind-v44-zen-themes';
+const CACHE_NAME = 'roka-mind-v45-reminders';
 const APP_SHELL_CACHE = `${CACHE_NAME}-shell`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 const AUDIO_CACHE = `${CACHE_NAME}-audio`;
@@ -8,6 +8,7 @@ const urlsToCache = [
   '/css/main.css',
   '/js/app.js',
   '/js/lib/dates.js',
+  '/js/lib/reminders.js',
   '/js/lib/persistence.js',
   '/js/lib/sync-model.js',
   '/js/lib/system.js',
@@ -90,4 +91,71 @@ self.addEventListener('fetch', event => {
 
   const isShellAsset = urlsToCache.includes(url.pathname);
   event.respondWith(networkFirst(event.request, isShellAsset ? APP_SHELL_CACHE : RUNTIME_CACHE));
+});
+
+// ─── Recordatorios ───
+// La app envía la configuración; el service worker la guarda en Cache Storage
+// para poder usarla cuando el sistema lo despierta con periodicsync.
+const REMINDERS_CACHE = 'roka-reminders-config';
+const WEEK_DAY_INDEX = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+async function readReminderStore() {
+  const cache = await caches.open(REMINDERS_CACHE);
+  const res = await cache.match('/__roka-reminders');
+  return res ? res.json() : { reminders: null, shown: {} };
+}
+
+async function writeReminderStore(store) {
+  const cache = await caches.open(REMINDERS_CACHE);
+  await cache.put('/__roka-reminders', new Response(JSON.stringify(store), { headers: { 'Content-Type': 'application/json' } }));
+}
+
+function reminderDateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function reminderMinutes(t) {
+  const [h, m] = String(t || '00:00').split(':').map(Number);
+  return h * 60 + m;
+}
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'ROKA_REMINDERS') {
+    event.waitUntil(readReminderStore().then(store => writeReminderStore({ ...store, reminders: event.data.reminders })));
+  }
+});
+
+self.addEventListener('periodicsync', event => {
+  if (event.tag !== 'roka-reminders') return;
+  event.waitUntil((async () => {
+    const store = await readReminderStore();
+    const r = store.reminders;
+    if (!r || !r.notifications) return;
+    const now = new Date();
+    const today = reminderDateKey(now);
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    let due = null;
+    if (now.getDay() === WEEK_DAY_INDEX[r.weeklyDay] && minutes >= reminderMinutes(r.weeklyTime) && store.shown.weekly !== today) {
+      due = { kind: 'weekly', title: 'ROKA · Cierra tu semana', body: 'Tu revisión semanal toma 10 minutos.', route: '#/semana/revision' };
+    } else if (minutes >= reminderMinutes(r.dailyTime) && store.shown.daily !== today) {
+      due = { kind: 'daily', title: 'ROKA · Planea tu día', body: 'Elige el siguiente paso de tus metas.', route: '#/hoy' };
+    }
+    if (!due) return;
+    await self.registration.showNotification(due.title, { body: due.body, tag: `roka-${due.kind}`, icon: '/assets/icon.svg', data: { route: due.route } });
+    await writeReminderStore({ ...store, shown: { ...store.shown, [due.kind]: today } });
+  })());
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const route = (event.notification.data && event.notification.data.route) || '#/hoy';
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const existing = windows.find(client => new URL(client.url).origin === self.location.origin);
+    if (existing) {
+      await existing.focus();
+      return existing.navigate(`/${route}`);
+    }
+    return self.clients.openWindow(`/${route}`);
+  })());
 });

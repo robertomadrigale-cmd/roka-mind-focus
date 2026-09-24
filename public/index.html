@@ -9,7 +9,7 @@
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon.svg">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="css/main.css?v=44-sync-v5">
+  <link rel="stylesheet" href="css/main.css?v=45-sync-v5">
 </head>
 <body>
   <!-- ===== ICON SPRITE ===== -->
@@ -937,6 +937,18 @@
                 <p class="account-sync-status" id="account-sync-status" data-status="offline">Sin sesión</p>
                 <button class="zen-btn zen-btn-ghost" id="logout-btn">Cerrar sesión</button>
               </div>
+              <div class="profile-settings-panel profile-reminders-panel">
+                <span class="page-eyebrow">Recordatorios</span>
+                <h2>Que el ciclo se vuelva hábito</h2>
+                <p>Un aviso cada mañana para planear tu día y uno cada semana para cerrar tu semana.</p>
+                <label class="profile-setting-row"><span>Plan del día</span><input type="time" class="zen-input reminder-input" id="reminder-daily-time"></label>
+                <div class="profile-setting-row"><span>Revisión semanal</span><span class="reminder-weekly"><select class="zen-input reminder-input" id="reminder-weekly-day" aria-label="Día de la revisión semanal"></select><input type="time" class="zen-input reminder-input" id="reminder-weekly-time" aria-label="Hora de la revisión semanal"></span></div>
+                <div class="profile-data-actions">
+                  <button class="zen-btn zen-btn-primary" id="add-reminders-calendar-btn"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Agregar a mi calendario</button>
+                  <button class="zen-btn zen-btn-ghost" id="enable-notifications-btn">Activar avisos en este dispositivo</button>
+                </div>
+                <p class="reminders-status" id="reminders-status"></p>
+              </div>
               <div class="profile-settings-panel profile-data-panel">
                 <span class="page-eyebrow">Privacidad y datos</span>
                 <h2>Tu información, bajo tu control</h2>
@@ -1104,6 +1116,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=44"></script>
+  <script type="module" src="js/app.js?v=45"></script>
 </body>
 </html>

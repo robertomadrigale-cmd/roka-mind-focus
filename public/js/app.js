@@ -7,6 +7,7 @@ import { localDateKey } from "./lib/dates.js";
 import { choosePersistedState, hasMeaningfulUserData, jsonSizeBytes, pruneStateForCloud, selectLocalCandidateForUser } from "./lib/persistence.js";
 import { carryOverTasks, completeTaskEffects, goalNextSteps, lowLifeAreas, migrateState as migrateSystemState, overdueTasks, ritualAdherence, shouldPromptWeeklyReview, weekKey, weekStats } from "./lib/system.js";
 import { callAIGateway } from "./services/aiGateway.js?v=10.10";
+import { WEEK_DAYS, buildRemindersICS, dueReminder, markReminderShown, normalizeReminders } from "./lib/reminders.js?v=45";
 import { renderSafeMarkdown, reportPreview } from "./services/markdown.js";
 import { clearSyncBase, hasPendingChanges, pushChanges, startSync, stopSync } from "./services/syncService.js?v=41-sync-v5";
 
@@ -2926,10 +2927,127 @@ function renderAIReportsList() {
 
 
 // ─── RENDER ALL ───
+// ─── RECORDATORIOS ───
+const REMINDERS_SHOWN_KEY = 'rokaMindRemindersShown';
+
+function getReminders() {
+  if (!state.settings) state.settings = {};
+  return normalizeReminders(state.settings.reminders || {});
+}
+
+function setReminders(patch) {
+  if (!state.settings) state.settings = {};
+  state.settings.reminders = normalizeReminders({ ...getReminders(), ...patch });
+  saveState(true);
+  postRemindersToServiceWorker();
+}
+
+function renderReminders() {
+  const r = getReminders();
+  const daily = $('#reminder-daily-time');
+  const day = $('#reminder-weekly-day');
+  const weekly = $('#reminder-weekly-time');
+  if (day && !day.options.length) day.innerHTML = WEEK_DAYS.map(item => `<option value="${esc(item.key)}">${esc(item.label)}</option>`).join('');
+  if (daily && document.activeElement !== daily) daily.value = r.dailyTime;
+  if (day && document.activeElement !== day) day.value = r.weeklyDay;
+  if (weekly && document.activeElement !== weekly) weekly.value = r.weeklyTime;
+  const status = $('#reminders-status');
+  if (status) {
+    const permission = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+    status.textContent = permission === 'unsupported'
+      ? 'Este navegador no permite avisos: usa "Agregar a mi calendario".'
+      : r.notifications && permission === 'granted'
+        ? 'Avisos activos en este dispositivo. Para avisos con la app cerrada, agrégalos también a tu calendario.'
+        : 'Consejo: "Agregar a mi calendario" te avisa aunque la app esté cerrada.';
+  }
+  const btn = $('#enable-notifications-btn');
+  if (btn) btn.textContent = r.notifications && typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'Desactivar avisos' : 'Activar avisos en este dispositivo';
+}
+
+function downloadRemindersCalendar() {
+  const ics = buildRemindersICS(getReminders(), { url: `${location.origin}/` });
+  const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'roka-recordatorios.ics';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  showToast('Abre el archivo para agregar los recordatorios a tu calendario');
+}
+
+async function toggleNotifications() {
+  const r = getReminders();
+  if (r.notifications) {
+    setReminders({ notifications: false });
+    renderReminders();
+    showToast('Avisos desactivados');
+    return;
+  }
+  if (typeof Notification === 'undefined') { showToast('Este navegador no permite avisos'); return; }
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') { showToast('Permiso de avisos no concedido'); renderReminders(); return; }
+  setReminders({ notifications: true });
+  await registerReminderSync();
+  renderReminders();
+  showToast('Avisos activados');
+}
+
+// Chrome/Android con la app instalada: el sistema despierta al service worker ~2 veces al día.
+async function registerReminderSync() {
+  try {
+    const registration = await navigator.serviceWorker?.ready;
+    if (!registration?.periodicSync) return;
+    const status = await navigator.permissions?.query({ name: 'periodic-background-sync' });
+    if (status && status.state !== 'granted') return;
+    await registration.periodicSync.register('roka-reminders', { minInterval: 6 * 60 * 60 * 1000 });
+  } catch (error) {
+    console.warn('Recordatorios en segundo plano no disponibles.', error);
+  }
+}
+
+function postRemindersToServiceWorker() {
+  navigator.serviceWorker?.ready.then(registration => {
+    registration.active?.postMessage({ type: 'ROKA_REMINDERS', reminders: getReminders() });
+  }).catch(() => {});
+}
+
+function readShownReminders() {
+  try { return JSON.parse(localStorage.getItem(REMINDERS_SHOWN_KEY) || '{}'); } catch { return {}; }
+}
+
+async function checkDueReminder() {
+  if (!currentUser) return;
+  const r = getReminders();
+  const due = dueReminder(r, readShownReminders());
+  if (!due) return;
+  localStorage.setItem(REMINDERS_SHOWN_KEY, JSON.stringify(markReminderShown(readShownReminders(), due.kind)));
+  if (r.notifications && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+    const registration = await navigator.serviceWorker?.ready.catch(() => null);
+    registration?.showNotification(`ROKA · ${due.title}`, { body: due.body, tag: `roka-${due.kind}`, icon: '/assets/icon.svg', data: { route: due.route } });
+    return;
+  }
+  showToast(`${due.title}: ${due.body}`);
+}
+
+function initReminders() {
+  $('#reminder-daily-time')?.addEventListener('change', event => setReminders({ dailyTime: event.target.value }));
+  $('#reminder-weekly-day')?.addEventListener('change', event => setReminders({ weeklyDay: event.target.value }));
+  $('#reminder-weekly-time')?.addEventListener('change', event => setReminders({ weeklyTime: event.target.value }));
+  $('#add-reminders-calendar-btn')?.addEventListener('click', downloadRemindersCalendar);
+  $('#enable-notifications-btn')?.addEventListener('click', toggleNotifications);
+  document.addEventListener('visibilitychange', checkDueReminder);
+  setInterval(checkDueReminder, 10 * 60 * 1000);
+  setTimeout(checkDueReminder, 4000);
+  postRemindersToServiceWorker();
+  if (getReminders().notifications) registerReminderSync();
+  renderReminders();
+}
+
 function renderAll() { 
   renderQuote(); renderPride(); renderGratitude(); 
   renderPlanner(); renderRituals(); renderDailyRitualsQuick(); renderWeeklyReflection(); 
   renderSmartGoals(); renderLearning(); renderStopDoing(); renderGiants(); renderQuarterly10(); renderAnnual(); renderPersonalMap(); renderProfile(); renderProgress(); renderBeliefsLibrary(); renderMantras(); updateXPDisplay(); checkBadges();
+  safeInit(renderReminders, 'renderReminders');
   renderTodaySystem();
   renderWeeklyReviewWizard();
   renderAdvancedTools();
@@ -3106,6 +3224,7 @@ function initThemeToggle() {
 function initApp() {
   safeInit(initThemeToggle, 'initThemeToggle');
   safeInit(initThemeQuickMenu, 'initThemeQuickMenu');
+  safeInit(initReminders, 'initReminders');
   safeInit(updateHeaderDate, 'updateHeaderDate');
   safeInit(initTabs, 'initTabs');
   safeInit(initCollapsibleSections, 'initCollapsibleSections');
@@ -3159,7 +3278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('caches' in window) {
       caches.keys()
         .then(keys => Promise.all(keys
-          .filter(key => key.startsWith('roka-mind-') && !key.includes('v44-zen-themes'))
+          .filter(key => key.startsWith('roka-mind-') && !key.includes('v45-reminders'))
           .map(key => caches.delete(key))))
         .catch(() => {});
     }

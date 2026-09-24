@@ -4122,3 +4122,8 @@ body {
 /* En temas claros el acento es oscuro: texto blanco en el botón principal. */
 body.light-theme .zen-btn-primary { color: #fff; }
 .theme-quick-menu { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+
+/* Recordatorios */
+.reminder-input { flex: 0 0 auto; width: 132px; min-width: 0; min-height: 40px; padding: 6px 10px; }
+.reminder-weekly { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.reminders-status { font-size: 13px; color: var(--text-secondary); margin-top: 10px; }
