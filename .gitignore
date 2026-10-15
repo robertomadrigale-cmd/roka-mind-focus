@@ -20,3 +20,7 @@ deployed-firestore.rules
 .firebase-config/
 .npm-cache/
 firestore-debug.log
+transcript*.txt
+*transcript*.txt
+temp_history*.txt
+.claude/
